@@ -25,13 +25,10 @@
 
 //============================================================================
 //
-//   Phase 3: Diagnostic for WS2812 Addressable LED on PB1 (pin 6)
+//   Phase 4: Blink LED on PB1 red and remove LED on PB4
 //
-//      Run a diagnostic loop on a WS2812 Addressable LED on PB1 (Pin 6).
-//   The diagnostic loop will cycle through the following colors: Red, Blue,
-//   Green, White and Black.  Color Change will occur once per loop.
-//
-//      Blink Led will continue to update once per loop.
+//      Blink the WS2812 Addressable LED on PB1 Red.  LED will change state
+//   once per loop.  Blink Led is removed from the project.
 //
 //============================================================================
 
@@ -93,19 +90,10 @@ int main(void) {
     // Initialize the loop counter
     loop_counter = 0;
 
-    // Set Blinking LED as output
-    DDRB |= (1 << BLINK_LED_PIN);
-
-    // Set Blinking LED initial state to OFF
-    PORTB &= ~(1 << BLINK_LED_PIN);
-
     // Enable global interrupts
     sei();
 
     while(1) {
-
-        // Toggle Blinking LED
-        PORTB ^= (1 << BLINK_LED_PIN);
 
         // Set WS2812 LED Color
         ws2812_set_color(led_value_red, led_value_green, led_value_blue);
@@ -123,27 +111,19 @@ int main(void) {
         // Update LED Color based on state value
         switch(state) {
             case 0:
-            case 5:
+            case 2:
+            case 4:
+            case 6:
+            case 8:
                 next_led_state = COLOR_RED;
                 break;
             case 1:
-            case 6:
-                next_led_state = COLOR_GREEN;
-                break;
-            case 2:
-            case 7:
-                next_led_state = COLOR_BLUE;
-                break;
             case 3:
-            case 8:
-                next_led_state = COLOR_WHITE;
-                break;
-            case 4:
+            case 5:
+            case 7:
             case 9:
-                next_led_state = COLOR_BLACK;
-                break;
             default:
-                next_led_state = COLOR_RED;
+                next_led_state = COLOR_BLACK;
                 break;
         }
 
