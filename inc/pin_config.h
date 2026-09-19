@@ -29,7 +29,7 @@
 //                                 ATTINY85
 //                            .----------------.
 //                  RESET 1 --| PB5        VCC |-- 8
-//                        2 --| PB3        PB2 |-- 7
+//                 ADC-IN 2 --| PB3        PB2 |-- 7
 //                        3 --| PB4        PB1 |-- 6 WS2812
 //                        4 --| GND        PB0 |-- 5
 //                            '----------------'
@@ -54,6 +54,10 @@
 //                                 '-----'
 //
 //============================================================================
+
+// Define PB3 as the ADC input pin for the Team Identification
+#define ADC_INPUT_PIN PB3
+#define ADC_INPUT_CHANNEL 3U
 
 // Define PB1 as the Data pin for the WS2812 LED
 #define WS2812_DIO_PIN PB1

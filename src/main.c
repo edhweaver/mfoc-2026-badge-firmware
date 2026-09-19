@@ -25,10 +25,16 @@
 
 //============================================================================
 //
-//   Phase 4: Blink LED on PB1 red and remove LED on PB4
+//   Phase 5: Blink LED color based on ADC Input on PB3 (pin 2)
 //
-//      Blink the WS2812 Addressable LED on PB1 Red.  LED will change state
-//   once per loop.  Blink Led is removed from the project.
+//      Verify that the ADC Input on Pin 2 can read a voltage from 0V to Vcc
+//   by updating the WS2812 LED color based on the ADC value.  The ADC input
+//   will effect the color of the WS2812 LED based on the following ranges:
+//     - 0x00 to 0x2A: Green
+//     - 0x2B to 0x69: Aqua
+//     - 0x6A to 0x94: Blue
+//     - 0x95 to 0xD4: Violet
+//     - 0xD5 to 0xFF: Red
 //
 //============================================================================
 
@@ -64,6 +70,27 @@ void timer0_init() {
     TCCR0B = (1 << CS02);
 }
 
+/* Initialize the ADC Input */
+void adc_init() {
+    // set ADC input pin as input
+    DDRB &= ~(1 << ADC_INPUT_PIN);
+
+    // Set ADC input pin, Left adjust ADC, and set Vcc to Vref
+    ADMUX = (1 << ADLAR) | ADC_INPUT_CHANNEL;
+
+    // Enable the ADC and set the prescaler to 64 for an ADC clock of 125 kHz
+    ADCSRA = (1 << ADEN) | (1 << ADPS2) | (1 << ADPS1);
+}
+
+uint8_t adc_read() {
+    // Start conversion
+    ADCSRA |= (1 << ADSC);
+
+    // Wait for conversion complete
+    while (ADCSRA & (1 << ADSC));
+
+    return ADCH; // Return 8-bit value
+}
 
 int main(void) {
 
@@ -78,8 +105,14 @@ int main(void) {
     uint8_t led_value_green = 0U;
     uint8_t led_value_blue = 0U;
 
+    // Initialize the ADC Input
+    uint8_t adc_value = 0U;
+
     //initialize Timer0 for 8ms interrupts
     timer0_init();
+
+    // Initialize the ADC Input
+    adc_init();
 
     // Initialize the WS2812 DI pin
     ws2812_set_di_pin();
@@ -94,6 +127,8 @@ int main(void) {
     sei();
 
     while(1) {
+        // Read the ADC value
+        adc_value = adc_read();
 
         // Set WS2812 LED Color
         ws2812_set_color(led_value_red, led_value_green, led_value_blue);
@@ -115,7 +150,17 @@ int main(void) {
             case 4:
             case 6:
             case 8:
-                next_led_state = COLOR_RED;
+                if (adc_value < 0x2BU) {
+                    next_led_state = COLOR_GREEN;
+                } else if (adc_value < 0x6AU) {
+                    next_led_state = COLOR_AQUA;
+                } else if (adc_value < 0x95U) {
+                    next_led_state = COLOR_BLUE;
+                } else if (adc_value < 0xD5U) {
+                    next_led_state = COLOR_VIOLET;
+                } else {
+                    next_led_state = COLOR_RED;
+                }
                 break;
             case 1:
             case 3:
@@ -137,6 +182,21 @@ int main(void) {
         // Sets led color values based on current led state
         // Sets next led state based on current led state
         switch(next_led_state) {
+            case COLOR_VIOLET:
+                led_value_red = 255U;
+                led_value_green = 0U;
+                led_value_blue = 255U;
+                break;
+            case COLOR_YELLOW:
+                led_value_red = 255U;
+                led_value_green = 255U;
+                led_value_blue = 0U;
+                break;
+            case COLOR_AQUA:
+                led_value_red = 0U;
+                led_value_green = 255U;
+                led_value_blue = 255U;
+                break;
             case COLOR_RED:
                 led_value_red = 255U;
                 led_value_green = 0U;

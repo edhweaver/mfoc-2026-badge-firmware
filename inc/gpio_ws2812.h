@@ -31,8 +31,11 @@
 // Define the colors for the WS2812 LED
 enum led_colors {
     COLOR_RED,
+    COLOR_VIOLET,
     COLOR_BLUE,
+    COLOR_AQUA,
     COLOR_GREEN,
+    COLOR_YELLOW,
     COLOR_WHITE,
     COLOR_BLACK,
 };
