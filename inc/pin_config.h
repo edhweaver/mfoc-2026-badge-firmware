@@ -30,7 +30,7 @@
 //                            .----------------.
 //                  RESET 1 --| PB5        VCC |-- 8
 //                        2 --| PB3        PB2 |-- 7
-//                  BLINK 3 --| PB4        PB1 |-- 6
+//                  BLINK 3 --| PB4        PB1 |-- 6 WS2812
 //                        4 --| GND        PB0 |-- 5
 //                            '----------------'
 //
@@ -57,5 +57,8 @@
 
 // Define the blinking LED pin
 #define BLINK_LED_PIN PB4
+
+// Define PB1 as the Data pin for the WS2812 LED
+#define WS2812_DIO_PIN PB1
 
 #endif /* PIN_CONFIG_H */
