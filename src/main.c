@@ -25,11 +25,16 @@
 
 //============================================================================
 //
-//   Phase 9: Receive NEC Frames via IR and store on SAO Client Interface
+//   Phase 10: Receive NEC Frames via IR and unlock Morse Code Messages
 //
 //      NEC-IN Input will decode a filtered infrared signal and will store
 //   the values internally in RAM.  The SAO Client can be used to read the
 //   last stored NEC Frame by reading 3 bytes.
+//
+//      When the last NEC Input Frame matches a specific Address and
+//   Command a message flag is unlocked.  Each message flag state is
+//   stored in EEPROM.  Messages are currently decoded as every available
+//   character.
 //
 //      First Byte of an SAO Write will switch the values of the SAO Read.
 //   The first byte of the SAO Read will match the first byte of the last
@@ -44,14 +49,43 @@
 //            - Value in 0x04 - Age of the last Received NEC Frame
 //     - All other Values - null values of 0xFF per I2C standard behaivior
 //
-//      The Code for Switch Y and Button X have been left in the code
-//   however, the initialization code is disabled so the flags for the
-//   inputs will not change state.
+//      All unlocked messages will geneated and display in order.  Once all
+//   messages have displayed, a 10 minute cooldown is then set prior to
+//   regenerating all messages.  The Button X will clear this cooldown.
+//
+//      On initialization, the state of Switch Y is checked.  If Switch Y
+//   is ON, start badge in Game mode.  If Switch Y is OFF, start badge in
+//   SAO mode.
+//
+//      Game mode will display all unlocked messages every 10 minutes.
+//   Pressing Button X will display messages immediately.
 //
 //============================================================================
 
 #define FIRMWARE_ID "MFOC 2026 Badge V"
-#define FIRMWARE_VERSION "0.01a"
+#define FIRMWARE_VERSION "0.02a"
+
+typedef struct {
+    enum led_colors start_color;
+    enum led_colors end_color;
+} badge_message_data_t;
+
+typedef struct {
+    enum led_colors start_color;
+    enum led_colors end_color;
+    uint8_t count;
+} message_color_t;
+
+//============================================================================
+//
+// Section: EEPROM Definition
+//
+//============================================================================
+
+// Define 4 initial variables directly inside the EEPROM section
+// The compiler assigns sequential addresses starting from 0x000 automatically
+__attribute__((used, section(".eeprom")))
+uint32_t EEMEM eeprom_message_flags = 0x00000000;
 
 //============================================================================
 //
@@ -78,6 +112,39 @@
 
 // Count of Timer 0 interrupts to start a new loop cycle for the Main Loop
 #define LOOP_COUNT                                                          25
+
+// Main Loop Cycles before repeating message (600 Seconds * 5 Cycles/Second)
+#define TIME_DELAY_MESSAGES                                               3000
+
+// Quantity of Hidden Messages
+#define HIDDEN_MESSAGES                                                     22
+
+#define MESSAGE_CHARACTERS    16
+
+const char badge_messages[HIDDEN_MESSAGES][MESSAGE_CHARACTERS] PROGMEM = {
+    "* ",
+    "ABCDEFGHIKLMNO ",
+    "PQRSTUVWXYZ ",
+    "0123456789 ",
+    "?,. ",
+    "ABCDEFGHIKLMNO ",
+    "PQRSTUVWXYZ ",
+    "0123456789 ",
+    "?,. ",
+    "ABCDEFGHIKLMNO ",
+    "PQRSTUVWXYZ ",
+    "0123456789 ",
+    "?,. ",
+    "ABCDEFGHIKLMNO ",
+    "PQRSTUVWXYZ ",
+    "0123456789 ",
+    "?,. ",
+    "ABCDEFGHIKLMNO ",
+    "PQRSTUVWXYZ ",
+    "0123456789 ",
+    "?,. ",
+    "eeeeeeeeeeeeee ",
+};
 
 #define NEC_INPUT_BUFFER_LIMIT                                              70
 
@@ -829,10 +896,68 @@ void initialize(void) {
     sei();
 }
 
+uint8_t count_bits(uint32_t value) {
+    uint8_t count = 0U;
+    while (value != 0U) {
+        if (value & 0x00000001U) {
+            count = count + 1U;
+        }
+        value = value >> 1;
+    }
+    if (count > (HIDDEN_MESSAGES - 1U)) {
+        count = (HIDDEN_MESSAGES - 1U);
+    }
+    return count;
+}
+
 int main(void) {
 
-    // Add State Machine State Variable
-    uint8_t state = 0;
+    // 22 hidden messages
+    badge_message_data_t badge_data[HIDDEN_MESSAGES] = {
+        {COLOR_TEAM, COLOR_TEAM},
+        {COLOR_TEAM, COLOR_RAINBOW_REVERSE},
+        {COLOR_RED, COLOR_GREEN},
+        {COLOR_GREEN, COLOR_BLUE},
+        {COLOR_BLUE, COLOR_RED},
+        {COLOR_YELLOW, COLOR_RAINBOW_FORWARD},
+        {COLOR_RED, COLOR_GREEN},
+        {COLOR_GREEN, COLOR_BLUE},
+        {COLOR_BLUE, COLOR_RED},
+        {COLOR_AQUA, COLOR_RED},
+        {COLOR_RED, COLOR_GREEN},
+        {COLOR_GREEN, COLOR_BLUE},
+        {COLOR_BLUE, COLOR_RED},
+        {COLOR_VIOLET, COLOR_GREEN},
+        {COLOR_RED, COLOR_GREEN},
+        {COLOR_GREEN, COLOR_BLUE},
+        {COLOR_BLUE, COLOR_RED},
+        {COLOR_VIOLET, COLOR_RAINBOW_FORWARD},
+        {COLOR_RED, COLOR_GREEN},
+        {COLOR_GREEN, COLOR_BLUE},
+        {COLOR_BLUE, COLOR_RED},
+        {COLOR_TEAM, COLOR_WHITE}
+    };
+
+    PGM_P badge_message_address;
+    char badge_message_buffer[MESSAGE_CHARACTERS] = {0};
+
+    // counter for badge message
+    uint8_t counter;
+    uint8_t nec_input_size;
+    uint8_t badge_data_index;
+    uint8_t messages_unlocked;
+    uint16_t delay_message_count;
+    uint32_t message_flags;
+    uint8_t save_message_flags;
+
+    // Morse Code Parser Data
+    morse_code_parser_t morse_engine;
+
+    // LED Color of the Morse Coded Message
+    message_color_t morse_led_state;
+
+    // Buffer to hold encoded Morse Code Phrase
+    char morse_phrase_buffer[MORSE_MAXIMUM_CHARACTERS];
 
     // Add State Machine for WS2812 LED
     enum led_colors next_led_state = COLOR_WHITE;
@@ -845,6 +970,10 @@ int main(void) {
     // Initialize the ADC Input
     uint8_t adc_value = 0U;
 
+    // Team ID and SAO Device Address for the Badge
+    uint8_t badge_team_id;
+    uint8_t sao_device_address;
+    uint8_t skip_message_delay;
     uint8_t nec_input_buffer[NEC_INPUT_BUFFER_LIMIT];
     nec_code_parser_t nec_input_data;
 
@@ -855,26 +984,65 @@ int main(void) {
 
     initialize();
 
+    morse_init(&morse_engine, morse_phrase_buffer, MORSE_MAXIMUM_CHARACTERS);
+
     Queue_Initialize(&nec_input_queue, nec_input_buffer, NEC_INPUT_BUFFER_LIMIT);
 
     nec_input_initialize(&nec_input_data);
 
     CLEAR_ALL_FLAGS
 
+    eeprom_busy_wait();
+
+    message_flags = eeprom_read_dword(&eeprom_message_flags);
+    messages_unlocked = count_bits(message_flags);
+
+    save_message_flags = 0U;
+
+    // Initialize to First Message without delay
+    morse_engine.parser_state = MORSE_END;
+    badge_data_index = HIDDEN_MESSAGES;
+    skip_message_delay = 0U;
+    delay_message_count = 0U;
+
     // Initialize the loop counter
     loop_counter = 0;
 
     SET_FLAG__NEC_IN_RESTART_COUNT
 
-    i2c_device_init(0x42);
+    // Detect and configure the Team Address
+    adc_value = adc_read();
+
+    // Update Team ID and SAO Device Address based on ADC value
+    if (adc_value < 0x2BU) {
+        badge_team_id = COLOR_YELLOW;
+        sao_device_address = 0x25U;
+    } else if (adc_value < 0x6AU) {
+        badge_team_id = COLOR_VIOLET;
+        sao_device_address = 0x24U;
+    } else if (adc_value < 0x95U) {
+        badge_team_id = COLOR_BLUE;
+        sao_device_address = 0x23U;
+    } else if (adc_value < 0xD5U) {
+        badge_team_id = COLOR_GREEN;
+        sao_device_address = 0x22U;
+    } else {
+        badge_team_id = COLOR_RED;
+        sao_device_address = 0x21U;
+    }
+
+    // Initialize SAO if switch is high
+    if (PINB & (1 << SWITCH_Y_PIN)) {
+        cli();
+        i2c_device_init(sao_device_address);
+        sei();
+        SAO_CLEAR_CLOCK_DETECT
+    }
 
     // Enable global interrupts
     sei();
 
     while(1) {
-
-        // Read the ADC value
-        adc_value = adc_read();
 
         // Set WS2812 LED Color
         ws2812_set_color(led_value_red, led_value_green, led_value_blue);
@@ -890,53 +1058,294 @@ int main(void) {
             sleep_disable();
         }
 
-        // Update LED Color based on state value
-        switch(state) {
-            case 0:
-            case 2:
-            case 4:
-            case 6:
-            case 8:
-                if (adc_value < 0x2BU) {
-                    next_led_state = COLOR_GREEN;
-                } else if (adc_value < 0x6AU) {
-                    next_led_state = COLOR_AQUA;
-                } else if (adc_value < 0x95U) {
-                    next_led_state = COLOR_BLUE;
-                } else if (adc_value < 0xD5U) {
-                    next_led_state = COLOR_VIOLET;
-                } else {
-                    next_led_state = COLOR_RED;
-                }
-                break;
-            case 1:
-            case 3:
-            case 5:
-            case 7:
-                if (nec_input_command == 0x00U) {
-                    next_led_state = COLOR_BLACK;
-                } else if (nec_input_command == 0x02U) {
-                    next_led_state = COLOR_WHITE;
-                } else {
-                    next_led_state = COLOR_YELLOW;
-                }
-                break;
-            case 9:
-            default:
+		{
+            // Process the Button X Press
+            //   - Trigger an NEC Frame Transmission
+            //   - Start First message without delay
+            if (READ_FLAG__BUTTON_X_PRESSED) {
+                morse_engine.parser_state = MORSE_END;
+                badge_data_index = HIDDEN_MESSAGES;
+                skip_message_delay = 1U;
+                delay_message_count = 0U;
+            }
+
+            // Process message displaying
+            if (delay_message_count > 0U) {
+
+                // Decrement the Delay
+                delay_message_count = delay_message_count - 1U;
+
+                // Keep LED off when Delaying the next Message
                 next_led_state = COLOR_BLACK;
-                break;
+            } else {
+
+                // Update to the next state based on the Morse Code
+                //   Element Buffer contents.  Once the state is ended,
+                //   stop updating states.
+                morse_parse_phrase(&morse_engine);
+
+                // Set LED if Morse is active based on the LED Color Count
+                // Deactivate LED if Morse is not active
+                if ((morse_engine.parser_state == MORSE_ACTIVE_EDGE) ||
+                    (morse_engine.parser_state == MORSE_PROCESS_ACTIVE)) {
+                    switch (morse_led_state.end_color) {
+                        default:
+                            if (morse_led_state.count == 0x00U) {
+                                next_led_state = morse_led_state.start_color;
+                            } else {
+                                next_led_state = morse_led_state.end_color;
+                            }
+                            break;
+                        case COLOR_RAINBOW_FORWARD:
+                        case COLOR_RAINBOW_REVERSE:
+                            switch (morse_led_state.count) {
+                                default:
+                                    next_led_state = COLOR_GREEN;
+                                    break;
+                                case 1U:
+                                    next_led_state = COLOR_AQUA;
+                                    break;
+                                case 2U:
+                                    next_led_state = COLOR_BLUE;
+                                    break;
+                                case 3U:
+                                    next_led_state = COLOR_VIOLET;
+                                    break;
+                                case 4U:
+                                    next_led_state = COLOR_RED;
+                                    break;
+                                case 5U:
+                                    next_led_state = COLOR_YELLOW;
+                                    break;
+                            }
+                            break;
+                    }
+                } else {
+                    next_led_state = COLOR_BLACK;
+                }
+
+                // Update the Message Index if the Morse Code Message is ended
+                if (morse_engine.parser_state == MORSE_END) {
+
+                    // Set Index to next message or zero if index overflows
+                    if (badge_data_index < (HIDDEN_MESSAGES - 1U)) {
+                        badge_data_index = badge_data_index + 1U;
+                    } else {
+                        badge_data_index = 0U;
+                    }
+
+                    // Set Index to Zero if Index if message is locked
+                    if (badge_data_index > messages_unlocked) {
+                        badge_data_index = 0U;
+                    }
+
+                    // Copy message from ROM to RAM
+                    badge_message_address = badge_messages[badge_data_index];
+                    strcpy_P(badge_message_buffer, badge_message_address);
+                }
+
+                // Set Morse Code Parser State to START if parser state is at
+                //   the end of a character or phrase.  Populate the Morse
+                //   Code Element buffer if the Morse Code Parser State is set
+                //   set to START by this function.
+                morse_convert_to_phrase(&morse_engine, badge_message_buffer);
+
+                // When the Morse Code Parser State started parsing a new
+                //   character, update the character elements
+                if (morse_engine.parser_state == MORSE_START) {
+
+                    // When new character is the started of a new message
+                    //     - Increment the Morse Code Phrase Index
+                    //     - Wrap the Morse Code Phrase Index to Zero when
+                    //       - Index increments past maximum value
+                    //       - Index increments past unlocked messages
+                    //     - When the Morse Code Phrase Index is set to Zero
+                    //       - Initialize the delay sending the first Phrase
+                    //     - Initialize First Color of the Phrase
+                    //     - Initialize Color Changes of the Phrase
+                    if (morse_engine.character_index == 0) {
+
+                        // Add a delay if this is the start of message 0 unless
+                        //   delay is flagged to be skipped
+                        if (badge_data_index == 0){
+                            if (skip_message_delay == 1) {
+                                delay_message_count = 1U;
+                                skip_message_delay = 0;
+                            } else {
+                                delay_message_count = TIME_DELAY_MESSAGES;
+                            }
+                        }
+
+                        // Set LED color for the first character
+                        morse_led_state.start_color =
+                            badge_data[badge_data_index].start_color;
+                        if ((morse_led_state.start_color == COLOR_TEAM) ||
+                            ((morse_led_state.start_color == COLOR_RAINBOW_FORWARD) ||
+                            (morse_led_state.start_color == COLOR_RAINBOW_REVERSE))) {
+                            morse_led_state.start_color = badge_team_id;
+                        }
+
+                        // Set LED color for the next character
+                        //   Set count used to cycle colors based on next color
+                        morse_led_state.end_color =
+                            badge_data[badge_data_index].end_color;
+                        if ((morse_led_state.end_color == COLOR_RAINBOW_FORWARD) ||
+                            (morse_led_state.end_color == COLOR_RAINBOW_REVERSE)) {
+                            switch (morse_led_state.start_color) {
+                                case COLOR_GREEN:
+                                    morse_led_state.count = 0U;
+                                    break;
+                                case COLOR_AQUA:
+                                    morse_led_state.count = 1U;
+                                    break;
+                                case COLOR_BLUE:
+                                    morse_led_state.count = 2U;
+                                    break;
+                                case COLOR_VIOLET:
+                                    morse_led_state.count = 3U;
+                                    break;
+                                case COLOR_RED:
+                                    morse_led_state.count = 4U;
+                                    break;
+                                default:
+                                case COLOR_YELLOW:
+                                    morse_led_state.count = 5U;
+                                    break;
+                            }
+                        } else if (morse_led_state.end_color == COLOR_TEAM) {
+                            morse_led_state.end_color = badge_team_id;
+                            morse_led_state.count = 0U;
+                        } else {
+                            morse_led_state.count = 0U;
+                        }
+                    } else {
+
+                        // Update the LED Color
+                        switch (morse_led_state.end_color) {
+                            case COLOR_RAINBOW_FORWARD:
+                                // Update the LED Color Count
+                                if (morse_led_state.count > 0U) {
+                                    morse_led_state.count--;
+                                } else {
+                                    morse_led_state.count = 5U;
+                                }
+                                break;
+                            case COLOR_RAINBOW_REVERSE:
+                                // Update the LED Color Count
+                                if (morse_led_state.count <= 4U) {
+                                    morse_led_state.count++;
+                                } else {
+                                    morse_led_state.count = 0U;
+                                }
+                                break;
+                            default:
+                                // Toggle the LED Color Count
+                                if (morse_led_state.count == 1U) {
+                                    morse_led_state.count = 0U;
+                                } else {
+                                    morse_led_state.count = 1U;
+                                }
+                                break;
+                        }
+                    }
+                }
+            }
         }
 
-        // State increments to 9, then back to 0
-        if (state < 9) {
-            state = state + 1;
-        } else {
-            state = 0;
+        // Process GPIO Pin Change Interrupts for NEC Frame Processing
+        Queue_Length(&nec_input_queue, &nec_input_size);
+
+        for (counter = 0U; counter < nec_input_size; counter++)
+        {
+            Queue_Eject(&nec_input_queue, &nec_input_data.pin_state);
+            nec_input_parser(&nec_input_data);
+            if (nec_input_data.parser_state == NEC_TAIL_00) {
+
+                // The NEC frame was processed
+                nec_input_address = nec_input_data.address;
+                nec_input_command = nec_input_data.command;
+                nec_input_capture_age = 1U;
+            }
         }
 
-    if (READ_FLAG__BUTTON_X_PRESSED) {
-        next_led_state = COLOR_BLACK;
-    }
+        // Update unlocked hidden messages
+        if (nec_input_capture_age == 1U) {
+            if (nec_input_command == 7U) {
+                switch (nec_input_address) {
+                    case 0xFB20:
+                        message_flags = 0x00000000;
+                        break;
+                    case 0xFB21:
+                        message_flags = message_flags | 0x0000000F;
+                        break;
+                    case 0xFB22:
+                        message_flags = message_flags | 0x0000001E;
+                        break;
+                    case 0xFB23:
+                        message_flags = message_flags | 0x000001E0;
+                        break;
+                    case 0xFB24:
+                        message_flags = message_flags | 0x00001E00;
+                        break;
+                    case 0xFB25:
+                        message_flags = message_flags | 0x0001E000;
+                        break;
+                    case 0xFB26:
+                        message_flags = message_flags | 0x001E0000;
+                        break;
+                    default:
+                        break;
+                }
+                messages_unlocked = count_bits(message_flags);
+                save_message_flags = 1U;
+            }
+        }
+
+        // Cardputer Interaction
+        if (nec_input_capture_age == 1U) {
+            if (nec_input_address == 0x12EDU) {
+                switch (nec_input_command) {
+                    case 0x00:
+                        message_flags = 0x00000000;
+                        break;
+                    case 0x01:
+                        message_flags = message_flags | 0x0000000F;
+                        break;
+                    case 0x02:
+                        message_flags = message_flags | 0x000000F0;
+                        break;
+                    case 0x03:
+                        message_flags = message_flags | 0x00000F00;
+                        break;
+                    case 0x04:
+                        message_flags = message_flags | 0x0000F000;
+                        break;
+                    case 0x05:
+                        message_flags = message_flags | 0x000F0000;
+                        break;
+                    case 0x06:
+                        message_flags = message_flags | 0x00F00000;
+                        break;
+                    default:
+                        break;
+                }
+                messages_unlocked = count_bits(message_flags);
+                save_message_flags = 1U;
+            }
+        }
+
+        // check if eeprom is ready to save and save changed message flags if new save is required
+        if (save_message_flags != 0U) {
+            if (eeprom_is_ready()) {
+                eeprom_update_dword((uint32_t*) &eeprom_message_flags,
+                                    message_flags);
+                save_message_flags = 0U;
+            }
+            morse_engine.parser_state = MORSE_END;
+            badge_data_index = HIDDEN_MESSAGES;
+            skip_message_delay = 1U;
+            delay_message_count = 0U;
+        }
 
         // Sets led color values based on current led state
         switch(next_led_state) {

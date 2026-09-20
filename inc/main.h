@@ -27,9 +27,12 @@
 #include <avr/interrupt.h>
 #include <util/delay.h>
 #include <avr/sleep.h>
+#include <avr/eeprom.h>
+#include <avr/pgmspace.h>
 #include "pin_config.h"
 #include "gpio_ws2812.h"
 #include "gpio_ir_nec.h"
+#include "morse.h"
 #include "queue.h"
 
 //============================================================================

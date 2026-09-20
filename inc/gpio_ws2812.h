@@ -38,6 +38,9 @@ enum led_colors {
     COLOR_YELLOW,
     COLOR_WHITE,
     COLOR_BLACK,
+    COLOR_RAINBOW_REVERSE,
+    COLOR_RAINBOW_FORWARD,
+    COLOR_TEAM
 };
 
 void ws2812_set_di_pin();
