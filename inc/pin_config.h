@@ -28,7 +28,7 @@
 //
 //                                 ATTINY85
 //                            .----------------.
-//                  RESET 1 --| PB5        VCC |-- 8
+//                NEC-OUT 1 --| PB5        VCC |-- 8
 //                 ADC-IN 2 --| PB3        PB2 |-- 7 BUTTON-X/SCL
 //                 NEC-IN 3 --| PB4        PB1 |-- 6 WS2812
 //                        4 --| GND        PB0 |-- 5 SWITCH-Y/SDA
@@ -74,5 +74,8 @@
 
 // Define PB1 as the Data pin for the WS2812 LED
 #define WS2812_DIO_PIN PB1
+
+// Define PB5 as the IR LED output pin
+#define IR_LED_PIN PB5
 
 #endif /* PIN_CONFIG_H */

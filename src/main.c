@@ -25,16 +25,17 @@
 
 //============================================================================
 //
-//   Phase 10: Receive NEC Frames via IR and unlock Morse Code Messages
+//   Phase 11: Transmit NEC Frames via Writes on the SAO Client Interface
 //
-//      NEC-IN Input will decode a filtered infrared signal and will store
-//   the values internally in RAM.  The SAO Client can be used to read the
-//   last stored NEC Frame by reading 3 bytes.
-//
-//      When the last NEC Input Frame matches a specific Address and
-//   Command a message flag is unlocked.  Each message flag state is
-//   stored in EEPROM.  Messages are currently decoded as every available
-//   character.
+//      NEC-OUT Output will transmit infrared pulsed encoded as an NEC Frame.
+//   The Transmitions will occur as soon the SAO Client processes the
+//   instructions for NEC Frame generation.  The instructions for NEC Frame
+//   generation are as follows:
+//     - Value in 0x00 - 0x02 - NEC Tramitter Instructions
+//     - Values in 0x01 and 0x02 - NEC Frame Address
+//     - Values in 0x03 - NEC Frame Command
+//     - Values in 0x04 - Number of Frames to Send
+//     - Values in 0x05 - Time between each Frame Transmission
 //
 //      First Byte of an SAO Write will switch the values of the SAO Read.
 //   The first byte of the SAO Read will match the first byte of the last
@@ -47,6 +48,11 @@
 //            - Values in 0x01 and 0x02 - NEC Frame Address
 //            - Value in 0x03 - NEC Frame Command
 //            - Value in 0x04 - Age of the last Received NEC Frame
+//     - 0x02 - NEC Tramitter information
+//            - Values in 0x01 and 0x02 - NEC Frame Address
+//            - Value in 0x03 - NEC Frame Command
+//            - Value in 0x04 - Number of Frames left to Send
+//            - Value in 0x05 - Time left before the next transmission
 //     - All other Values - null values of 0xFF per I2C standard behaivior
 //
 //      All unlocked messages will geneated and display in order.  Once all
@@ -60,10 +66,17 @@
 //      Game mode will display all unlocked messages every 10 minutes.
 //   Pressing Button X will display messages immediately.
 //
+//      SAO mode will blink the LED red every time a NEC Frame is
+//   transmitted.
+//
+//      This project file still have Pin 1 set to the reset function.
+//   This is required to program the ATTINY85 unless the programmer has
+//   the ability to use the high voltage programming mode.
+//
 //============================================================================
 
 #define FIRMWARE_ID "MFOC 2026 Badge V"
-#define FIRMWARE_VERSION "0.02a"
+#define FIRMWARE_VERSION "0.03a"
 
 typedef struct {
     enum led_colors start_color;
@@ -143,7 +156,7 @@ const char badge_messages[HIDDEN_MESSAGES][MESSAGE_CHARACTERS] PROGMEM = {
     "PQRSTUVWXYZ ",
     "0123456789 ",
     "?,. ",
-    "eeeeeeeeeeeeee ",
+    "eeeeeeeeeeeeee "
 };
 
 #define NEC_INPUT_BUFFER_LIMIT                                              70
@@ -180,6 +193,32 @@ enum sao_port_states {
 
 //============================================================================
 //
+// Section: Strong functions for blocking preventing race conditions
+//
+//      This section contains the strong functions that will prevent time
+//   critical from executing when another time critial function is in
+//   process.
+//
+//============================================================================
+
+void ws2812_block_until_safe() {
+
+    // Wait until Time Critical Functions are complete.
+    while (READ_FLAG__TIME_CRITICAL_ACTIVE) {
+        ;
+    }
+}
+
+void ir_nec_block_until_safe() {
+
+    // Wait until Time Critical Functions are complete.
+    while (READ_FLAG__TIME_CRITICAL_ACTIVE) {
+        ;
+    }
+}
+
+//============================================================================
+//
 // Section: Global Variables
 //
 //      This section contains the variables used by the Main Loop and
@@ -196,6 +235,13 @@ enum sao_port_states {
 volatile uint8_t nec_input_command;
 volatile uint16_t nec_input_address;
 volatile uint8_t nec_input_capture_age;
+
+// Variables to hold the NEC code to IR LED Transmitter
+volatile uint16_t nec_transmit_address;
+volatile uint8_t nec_transmit_command;
+volatile uint8_t nec_transmit_repeats;
+volatile uint8_t nec_transmit_rate;
+volatile uint8_t nec_transmit_trigger;
 
 volatile uint8_t sao_device_address = 0;
 volatile uint8_t sao_buffer_index = 0;
@@ -511,6 +557,17 @@ ISR(USI_OVF_vect) {
                 sao_buffer[sao_buffer_index - 1] = USIDR;
                 sao_state = SAO_ACK_WRITE;
                 SAO_SEND_ACK
+                if (sao_buffer_index == 1) {
+                    sao_output_buffer[0] = sao_buffer[0];
+                } else if (sao_buffer_index == 6) {
+                    if (sao_output_buffer[0] == 0x02U) {
+                        nec_transmit_address = (uint16_t) ((sao_buffer[2] << 8) | sao_buffer[1]);
+                        nec_transmit_command = sao_buffer[3];
+                        nec_transmit_repeats = sao_buffer[4];
+                        nec_transmit_rate = sao_buffer[5];
+                        nec_transmit_trigger = sao_buffer[5];
+                    }
+                }
                 sao_buffer_index++;
             } else {
                 SAO_SEND_NACK
@@ -621,6 +678,28 @@ ISR(USI_OVF_vect) {
                                 break;
                             case 4:
                                 sao_output_buffer[4] = nec_input_capture_age;
+                                break;
+                            default:
+                                sao_output_buffer[sao_buffer_index] = 0xFF;
+                                break;
+                        }
+                        break;
+                    case 0x02U:
+                        switch (sao_buffer_index) {
+                            case 1:
+                                sao_output_buffer[1] = (uint8_t) ((nec_transmit_address & 0xFF00U) >> 8);
+                                break;
+                            case 2:
+                                sao_output_buffer[2] = (uint8_t) (nec_transmit_address & 0x00FFU);
+                                break;
+                            case 3:
+                                sao_output_buffer[3] = nec_transmit_command;
+                                break;
+                            case 4:
+                                sao_output_buffer[4] = nec_transmit_repeats;
+                                break;
+                            case 5:
+                                sao_output_buffer[5] = nec_transmit_trigger;
                                 break;
                             default:
                                 sao_output_buffer[sao_buffer_index] = 0xFF;
@@ -852,7 +931,11 @@ uint8_t adc_read() {
 
 /* Initialize the Switch Y Input */
 void switch_y_init() {
+    PORTB |= (1 << SWITCH_Y_PIN);
     DDRB &= ~(1 << SWITCH_Y_PIN);
+    SAO_STOP
+    GIMSK |= (1 << PCIE);
+    PCMSK |= (1 << SAO_CLOCK_DETECT_INTERRUPT);
 }
 
 /* Initialize the Button X Input */
@@ -886,6 +969,9 @@ void initialize(void) {
     button_x_init();
 
     SAO_CLEAR_INTERRUPT_FLAGS
+
+    // Initialize the NEC Transmitter pin
+    ir_nec_set_pin();
 
     // set processor to sleep mode idle to save power between interrupts
     set_sleep_mode(SLEEP_MODE_IDLE);
@@ -950,6 +1036,11 @@ int main(void) {
     uint32_t message_flags;
     uint8_t save_message_flags;
 
+    // trigger for NEC Frame transmission
+    uint8_t trigger_transmit_nec_frame;
+    uint16_t transmit_nec_address;
+    uint8_t transmit_nec_command;
+
     // Morse Code Parser Data
     morse_code_parser_t morse_engine;
 
@@ -958,6 +1049,13 @@ int main(void) {
 
     // Buffer to hold encoded Morse Code Phrase
     char morse_phrase_buffer[MORSE_MAXIMUM_CHARACTERS];
+
+    // Add State Machine to manage the NEC Transmitter
+    enum nec_transmission_states current_nec_transmit_state = BADGE_SAO_DISABLED;
+    enum nec_transmission_states next_nec_transmit_state = BADGE_SAO_DISABLED;
+
+    // Monitor the SAO Port State (Active or Disabled)
+    enum sao_port_states sao_port_status;
 
     // Add State Machine for WS2812 LED
     enum led_colors next_led_state = COLOR_WHITE;
@@ -972,10 +1070,19 @@ int main(void) {
 
     // Team ID and SAO Device Address for the Badge
     uint8_t badge_team_id;
+    uint16_t nec_transmit_team_address;
     uint8_t sao_device_address;
     uint8_t skip_message_delay;
+
     uint8_t nec_input_buffer[NEC_INPUT_BUFFER_LIMIT];
     nec_code_parser_t nec_input_data;
+
+    // Initialize the Global NEC transmit variables
+    nec_transmit_address = 0x0000U;
+    nec_transmit_command = 0x00U;
+    nec_transmit_rate = 0U;
+    nec_transmit_repeats = 0U;
+    nec_transmit_trigger = 0U;
 
     // Initialize the Global NEC receiver variables
     nec_input_address = 0x0000U;
@@ -997,6 +1104,7 @@ int main(void) {
     message_flags = eeprom_read_dword(&eeprom_message_flags);
     messages_unlocked = count_bits(message_flags);
 
+    trigger_transmit_nec_frame = 0U;
     save_message_flags = 0U;
 
     // Initialize to First Message without delay
@@ -1017,18 +1125,23 @@ int main(void) {
     if (adc_value < 0x2BU) {
         badge_team_id = COLOR_YELLOW;
         sao_device_address = 0x25U;
+        nec_transmit_team_address = 0xFB15;
     } else if (adc_value < 0x6AU) {
-        badge_team_id = COLOR_VIOLET;
+        badge_team_id = COLOR_GREEN;
         sao_device_address = 0x24U;
+        nec_transmit_team_address = 0xFB14;
     } else if (adc_value < 0x95U) {
         badge_team_id = COLOR_BLUE;
         sao_device_address = 0x23U;
+        nec_transmit_team_address = 0xFB13;
     } else if (adc_value < 0xD5U) {
-        badge_team_id = COLOR_GREEN;
+        badge_team_id = COLOR_VIOLET;
         sao_device_address = 0x22U;
+        nec_transmit_team_address = 0xFB12;
     } else {
         badge_team_id = COLOR_RED;
         sao_device_address = 0x21U;
+        nec_transmit_team_address = 0xFB11;
     }
 
     // Initialize SAO if switch is high
@@ -1037,12 +1150,18 @@ int main(void) {
         i2c_device_init(sao_device_address);
         sei();
         SAO_CLEAR_CLOCK_DETECT
+        sao_port_status = SAO_PORT_I2C_ACTIVE;
+    } else {
+        sao_port_status = SAO_PORT_I2C_DISABLED;
     }
 
     // Enable global interrupts
     sei();
 
     while(1) {
+
+        // Update the current nec transmission state based on prior loop
+        current_nec_transmit_state = next_nec_transmit_state;
 
         // Set WS2812 LED Color
         ws2812_set_color(led_value_red, led_value_green, led_value_blue);
@@ -1058,15 +1177,85 @@ int main(void) {
             sleep_disable();
         }
 
-		{
+        // Transmit NEC Frame
+        if (trigger_transmit_nec_frame == 1U) {
+            trigger_transmit_nec_frame = 0U;
+            ir_nec_send(transmit_nec_address, transmit_nec_command);
+        }
+
+        // Hold for 2 Timer 0 interrupt (120 milliseconds) to resynch the loop
+        //   Resynchronizing for the WS2812 LED took 16 milliseconds
+        //   Sending an NEC Frame takes up to 104 milliseconds
+        while(loop_counter < 15) {
+            // Sleep until Next Interrupt
+            cli();
+            sleep_enable();
+            sei();
+            sleep_cpu();
+            sleep_disable();
+        }
+
+        // Update behaviors when SAO Port is Active/Inactive and Unknown
+        if (sao_port_status == SAO_PORT_I2C_ACTIVE) {
+
+            // Setup NEC Transmissions as requested by SAO
+            //   Otherwise disable NEC Transmissions
+            switch (current_nec_transmit_state) {
+                case BADGE_SAO_ACTIVE_NEC_IDLE:
+                    if (nec_transmit_repeats > 0U) {
+                        if (nec_transmit_trigger == 1U) {
+                            next_nec_transmit_state = BADGE_NEC_TRIGGERED_VIA_SAO;
+
+                            nec_transmit_repeats--;
+
+                            nec_transmit_trigger = nec_transmit_rate;
+                        } else if (nec_transmit_trigger > 0U) {
+                            next_nec_transmit_state = BADGE_SAO_ACTIVE_NEC_IDLE;
+                            nec_transmit_trigger--;
+                        } else {
+                            next_nec_transmit_state = BADGE_SAO_ACTIVE_NEC_IDLE;
+                            nec_transmit_repeats = 0U;
+                            nec_transmit_trigger = 0U;
+                        }
+                    } else {
+                        next_nec_transmit_state = BADGE_SAO_ACTIVE_NEC_IDLE;
+                        nec_transmit_trigger = 0U;
+                    }
+                    break;
+                case BADGE_NEC_TRIGGERED_VIA_SAO:
+                    next_nec_transmit_state = BADGE_SAO_ACTIVE_NEC_IDLE;
+                    nec_transmit_trigger = nec_transmit_rate;
+                    break;
+                default:
+                    next_nec_transmit_state = BADGE_SAO_ACTIVE_NEC_IDLE;
+                    nec_transmit_trigger = 0U;
+                    break;
+            }
+
+            // If an NEC transmission is set to occur, the LED Color is Red
+            //   Otherwise, the LED Color is black
+            switch (current_nec_transmit_state) {
+                case BADGE_NEC_TRIGGERED_VIA_SAO:
+                    next_led_state = COLOR_RED;
+                    break;
+            default:
+                next_led_state = COLOR_BLACK;
+                break;
+            }
+
+        } else if (sao_port_status == SAO_PORT_I2C_DISABLED) {
+
             // Process the Button X Press
             //   - Trigger an NEC Frame Transmission
             //   - Start First message without delay
             if (READ_FLAG__BUTTON_X_PRESSED) {
+                next_nec_transmit_state = BADGE_NEC_TRIGGERED_VIA_BUTTON;
                 morse_engine.parser_state = MORSE_END;
                 badge_data_index = HIDDEN_MESSAGES;
                 skip_message_delay = 1U;
                 delay_message_count = 0U;
+            } else {
+                next_nec_transmit_state = BADGE_SAO_DISABLED;
             }
 
             // Process message displaying
@@ -1250,6 +1439,15 @@ int main(void) {
                     }
                 }
             }
+        } else {
+            // Disable NEC Transmissions
+            next_nec_transmit_state = BADGE_SAO_DISABLED;
+
+            // Setup Transmission of NEC Frame
+            trigger_transmit_nec_frame = 0U;
+
+            // Disable LED
+            next_led_state = COLOR_BLACK;
         }
 
         // Process GPIO Pin Change Interrupts for NEC Frame Processing
@@ -1266,6 +1464,24 @@ int main(void) {
                 nec_input_command = nec_input_data.command;
                 nec_input_capture_age = 1U;
             }
+        }
+
+        // Process NEC Frams for transmission
+        if (next_nec_transmit_state == BADGE_NEC_TRIGGERED_VIA_BUTTON) {
+            // Trigger NEC Frame Transmission if a Button Press is detected
+            trigger_transmit_nec_frame = 1U;
+            transmit_nec_address = nec_transmit_team_address;
+            transmit_nec_command = 0x01;
+        } else if (next_nec_transmit_state == BADGE_NEC_TRIGGERED_VIA_IR) {
+            // Trigger NEC Frame Transmission if a transmit NEC Frame is received
+            trigger_transmit_nec_frame = 1U;
+            transmit_nec_address = nec_transmit_team_address;
+            transmit_nec_command = messages_unlocked;
+        } else if (next_nec_transmit_state == BADGE_NEC_TRIGGERED_VIA_SAO) {
+            // Trigger NEC Frame Transmission if a transmit NEC Frame is received
+            trigger_transmit_nec_frame = 1U;
+            transmit_nec_address = nec_transmit_address;
+            transmit_nec_command = nec_transmit_command;
         }
 
         // Update unlocked hidden messages

@@ -83,6 +83,8 @@ typedef struct {
     uint8_t command;
 } nec_code_parser_t;
 
+void ir_nec_set_pin();
+void ir_nec_send(uint16_t address, uint8_t command);
 void ir_nec_block_until_safe();
 void receiver_nec_set_pin();
 void nec_input_initialize(nec_code_parser_t * nec_input);

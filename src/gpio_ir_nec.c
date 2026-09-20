@@ -46,6 +46,133 @@ __attribute__((weak)) void ir_nec_block_until_safe() {
 }
 
 /* Initialize the IR Receiver pin */
+void ir_nec_set_pin() {
+
+    // Set the IR LED pin as output
+    DDRB |= (1 << IR_LED_PIN);
+}
+
+/* Pulse the IR LED for at a 39 kHz frequency while sending a NEC frame */
+void ir_nec_send(uint16_t address, uint8_t command) {
+
+    // Wait until Time Critical Functions are complete.
+    ir_nec_block_until_safe();
+
+    // Disable the Global Interrupt Enable bit
+    // This mimics the behavior of an Interrupt Service Routine (ISR) on the
+    // ATTiny85 MCU.  This ensures that the timing of the WS2812 data signal
+    // is not disrupted by interrupts.
+    cli();
+
+    // Calculate the inverted command bits for the NEC protocol
+    uint8_t inverted_command = ~command;
+
+    // Send 177 pulses to start a frame (9 msec pulse at 39 kHz)
+    for (uint8_t counter = 177; counter > 0; counter--) {
+
+        // Turn on IR LED and wait for 25 usec
+        PORTB |= (1 << IR_LED_PIN);
+        _delay_us(25);
+
+        // Turn off IR LED and wait for 26 usec
+        PORTB &= ~(1 << IR_LED_PIN);
+        _delay_us(26);
+    }
+
+    // Wait for 4.5 msec with IR LED off to complete the start frame
+    _delay_us(4474);
+
+    // Send the address bits (16 bits)
+    for (uint8_t bit_counter = 16; bit_counter > 0; bit_counter--) {
+
+        // Send 11 pulses for (561 usec pulse at 39 kHz)
+        for (uint8_t counter = 11; counter > 0; counter--) {
+
+            // Turn on IR LED and wait for 25 usec
+            PORTB |= (1 << IR_LED_PIN);
+            _delay_us(25);
+
+            // Turn off IR LED and wait for 26 usec
+            PORTB &= ~(1 << IR_LED_PIN);
+            _delay_us(26);
+        }
+
+        // Wait based on the value of the current bit
+        if (address & 0x0001U) {
+            // Wait for 1690 usec for a '1'
+            _delay_us(1690);
+        } else {
+            // Wait for 560 usec for a '0'
+            _delay_us(560);
+        }
+
+        // Shift to the next bit
+        address >>= 1;
+    }
+
+    // Send the command bits (8 bits)
+    for (uint8_t bit_counter = 8; bit_counter > 0; bit_counter--) {
+
+        // Send 11 pulses for (561 usec pulse at 39 kHz)
+        for (uint8_t counter = 11; counter > 0; counter--) {
+
+            // Turn on IR LED and wait for 25 usec
+            PORTB |= (1 << IR_LED_PIN);
+            _delay_us(25);
+
+            // Turn off IR LED and wait for 26 usec
+            PORTB &= ~(1 << IR_LED_PIN);
+            _delay_us(26);
+        }
+
+        // Wait based on the value of the current bit
+        if (command & 0x0001U) {
+            // Wait for 1690 usec for a '1'
+            _delay_us(1690);
+        } else {
+            // Wait for 560 usec for a '0'
+            _delay_us(560);
+        }
+
+        // Shift to the next bit
+        command >>= 1;
+    }
+
+    // Send the command bits inverted (8 bits)
+    for (uint8_t bit_counter = 9; bit_counter > 0; bit_counter--) {
+
+        // Send 11 pulses for (561 usec pulse at 39 kHz)
+        for (uint8_t counter = 11; counter > 0; counter--) {
+
+            // Turn on IR LED and wait for 25 usec
+            PORTB |= (1 << IR_LED_PIN);
+            _delay_us(25);
+
+            // Turn off IR LED and wait for 26 usec
+            PORTB &= ~(1 << IR_LED_PIN);
+            _delay_us(26);
+        }
+
+        // Wait based on the value of the current bit
+        if (inverted_command & 0x0001U) {
+            // Wait for 1690 usec for a '1'
+            _delay_us(1690);
+        } else {
+            // Wait for 560 usec for a '0'
+            _delay_us(560);
+        }
+
+        // Shift to the next bit
+        inverted_command >>= 1;
+    }
+
+    // Re-enable the Global Interrupt Enable bit
+    sei();
+
+    _delay_us(1500);
+}
+
+/* Initialize the IR Receiver pin */
 void receiver_nec_set_pin() {
 
     // Set IR Receiver pin as input
