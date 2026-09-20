@@ -25,7 +25,11 @@
 
 //============================================================================
 //
-//   Phase 12: Messages for 2026 Maker Faire Orange County
+//   Phase 13: Violet and Green Pin Correction
+//
+//      Direction was provided and PCBA population for Violet and Green
+//   produced incorrect results.  Code has been updated based on this
+//   feedback.
 //
 //      NEC-OUT Output will transmit infrared pulsed encoded as an NEC Frame.
 //   The Transmitions will occur as soon the SAO Client processes the
@@ -72,7 +76,7 @@
 //============================================================================
 
 #define FIRMWARE_ID "MFOC 2026 Badge V"
-#define FIRMWARE_VERSION "1.00a"
+#define FIRMWARE_VERSION "1.10a"
 
 typedef struct {
     enum led_colors start_color;
@@ -1123,7 +1127,7 @@ int main(void) {
         sao_device_address = 0x25U;
         nec_transmit_team_address = 0xFB15;
     } else if (adc_value < 0x6AU) {
-        badge_team_id = COLOR_GREEN;
+        badge_team_id = COLOR_VIOLET;
         sao_device_address = 0x24U;
         nec_transmit_team_address = 0xFB14;
     } else if (adc_value < 0x95U) {
@@ -1131,7 +1135,7 @@ int main(void) {
         sao_device_address = 0x23U;
         nec_transmit_team_address = 0xFB13;
     } else if (adc_value < 0xD5U) {
-        badge_team_id = COLOR_VIOLET;
+        badge_team_id = COLOR_GREEN;
         sao_device_address = 0x22U;
         nec_transmit_team_address = 0xFB12;
     } else {
