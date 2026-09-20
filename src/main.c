@@ -25,7 +25,7 @@
 
 //============================================================================
 //
-//   Phase 11: Transmit NEC Frames via Writes on the SAO Client Interface
+//   Phase 12: Messages for 2026 Maker Faire Orange County
 //
 //      NEC-OUT Output will transmit infrared pulsed encoded as an NEC Frame.
 //   The Transmitions will occur as soon the SAO Client processes the
@@ -69,14 +69,10 @@
 //      SAO mode will blink the LED red every time a NEC Frame is
 //   transmitted.
 //
-//      This project file still have Pin 1 set to the reset function.
-//   This is required to program the ATTINY85 unless the programmer has
-//   the ability to use the high voltage programming mode.
-//
 //============================================================================
 
 #define FIRMWARE_ID "MFOC 2026 Badge V"
-#define FIRMWARE_VERSION "0.03a"
+#define FIRMWARE_VERSION "1.00a"
 
 typedef struct {
     enum led_colors start_color;
@@ -136,27 +132,27 @@ uint32_t EEMEM eeprom_message_flags = 0x00000000;
 
 const char badge_messages[HIDDEN_MESSAGES][MESSAGE_CHARACTERS] PROGMEM = {
     "* ",
-    "ABCDEFGHIKLMNO ",
-    "PQRSTUVWXYZ ",
-    "0123456789 ",
-    "?,. ",
-    "ABCDEFGHIKLMNO ",
-    "PQRSTUVWXYZ ",
-    "0123456789 ",
-    "?,. ",
-    "ABCDEFGHIKLMNO ",
-    "PQRSTUVWXYZ ",
-    "0123456789 ",
-    "?,. ",
-    "ABCDEFGHIKLMNO ",
-    "PQRSTUVWXYZ ",
-    "0123456789 ",
-    "?,. ",
-    "ABCDEFGHIKLMNO ",
-    "PQRSTUVWXYZ ",
-    "0123456789 ",
-    "?,. ",
-    "eeeeeeeeeeeeee "
+    "HELLO MAKER",
+    "WELCOME MFOC",
+    "OC MAKES",
+    "KEEP MAKING",
+    "BUILD MORE",
+    "CREATE TOGETHER",
+    "SHARE SKILLS",
+    "TRY TEST FIX",
+    "HACK THE BADGE",
+    "MFOC CONNECTS",
+    "PLUG IN SAO",
+    "I2C READY",
+    "MASTER CONTROL",
+    "CONTROL ME",
+    "SEND IR",
+    "TV REMOTE MODE",
+    "MADE IN THE OC",
+    "SURFING MAKEY",
+    "OLYMPICS 2028?",
+    "MASTER?",
+    "SAO READY"
 };
 
 #define NEC_INPUT_BUFFER_LIMIT                                              70
