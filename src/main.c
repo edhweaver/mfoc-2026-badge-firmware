@@ -25,11 +25,16 @@
 
 //============================================================================
 //
-//   Phase 13: Violet and Green Pin Correction
+//   Phase 14: Post Maker Faire Updates
 //
-//      Direction was provided and PCBA population for Violet and Green
-//   produced incorrect results.  Code has been updated based on this
-//   feedback.
+//      I2C Address, LED Color, and NEC Address have been updated to match
+//   the PCB Silkscreen.  The LED Color sets the I2C Address and NEC Address
+//   as follows:
+//     - Red - I2C Address 0x21 and NEC Address 0xFB11
+//     - Violet - I2C Address 0x22 and NEC Address 0xFB12
+//     - Blue - I2C Address 0x23 and NEC Address 0xFB13
+//     - Green - I2C Address 0x24 and NEC Address 0xFB14
+//     - Yellow - I2C Address 0x25 and NEC Address 0xFB15
 //
 //      NEC-OUT Output will transmit infrared pulsed encoded as an NEC Frame.
 //   The Transmitions will occur as soon the SAO Client processes the
@@ -73,10 +78,12 @@
 //      SAO mode will blink the LED red every time a NEC Frame is
 //   transmitted.
 //
+//      Add a delay between each message.
+//
 //============================================================================
 
 #define FIRMWARE_ID "MFOC 2026 Badge V"
-#define FIRMWARE_VERSION "1.10a"
+#define FIRMWARE_VERSION "1.11a"
 
 typedef struct {
     enum led_colors start_color;
@@ -1128,16 +1135,16 @@ int main(void) {
         nec_transmit_team_address = 0xFB15;
     } else if (adc_value < 0x6AU) {
         badge_team_id = COLOR_VIOLET;
-        sao_device_address = 0x24U;
-        nec_transmit_team_address = 0xFB14;
+        sao_device_address = 0x22U;
+        nec_transmit_team_address = 0xFB12;
     } else if (adc_value < 0x95U) {
         badge_team_id = COLOR_BLUE;
         sao_device_address = 0x23U;
         nec_transmit_team_address = 0xFB13;
     } else if (adc_value < 0xD5U) {
         badge_team_id = COLOR_GREEN;
-        sao_device_address = 0x22U;
-        nec_transmit_team_address = 0xFB12;
+        sao_device_address = 0x24U;
+        nec_transmit_team_address = 0xFB14;
     } else {
         badge_team_id = COLOR_RED;
         sao_device_address = 0x21U;
@@ -1363,6 +1370,9 @@ int main(void) {
                             } else {
                                 delay_message_count = TIME_DELAY_MESSAGES;
                             }
+                        } else {
+                            // Add a delay between each message
+                            delay_message_count = 6U;
                         }
 
                         // Set LED color for the first character
