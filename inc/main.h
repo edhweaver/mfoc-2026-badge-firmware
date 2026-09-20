@@ -71,6 +71,16 @@ register uint8_t timer_2_flags __asm__("r3");
 #define CLEAR_FLAG__BUTTON_X_RELEASED              timer_2_flags &= ~(1 << 7);
 #define READ_FLAG__BUTTON_X_RELEASED                  timer_2_flags & (1 << 7)
 
+// Flag is Active when SAO state is triggered to change
+#define SET_FLAG__SAO_STATE_TRIGGER                 timer_2_flags |= (1 << 0);
+#define CLEAR_FLAG__SAO_STATE_TRIGGER              timer_2_flags &= ~(1 << 0);
+#define READ_FLAG__SAO_STATE_TRIGGER                  timer_2_flags & (1 << 0)
+
+// Flag is Active when I2C Frame is active
+#define SET_FLAG__I2C_ACTIVE                        timer_2_flags |= (1 << 1);
+#define CLEAR_FLAG__I2C_ACTIVE                     timer_2_flags &= ~(1 << 1);
+#define READ_FLAG__I2C_ACTIVE                         timer_2_flags & (1 << 1)
+
 #define CLEAR_ALL_FLAGS                                  timer_1_flags = 0U; \
                                                            timer_2_flags = 0U;
 

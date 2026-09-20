@@ -29,9 +29,9 @@
 //                                 ATTINY85
 //                            .----------------.
 //                  RESET 1 --| PB5        VCC |-- 8
-//                 ADC-IN 2 --| PB3        PB2 |-- 7 BUTTON-X
+//                 ADC-IN 2 --| PB3        PB2 |-- 7 BUTTON-X/SCL
 //                        3 --| PB4        PB1 |-- 6 WS2812
-//                        4 --| GND        PB0 |-- 5 SWITCH-Y
+//                        4 --| GND        PB0 |-- 5 SWITCH-Y/SDA
 //                            '----------------'
 //
 //============================================================================
@@ -55,11 +55,14 @@
 //
 //============================================================================
 
-// Define PB0 as the Switch Y input pin
+// Define PB0 as the Switch Y input pin and SAO SDA pin
 #define SWITCH_Y_PIN PB0
+#define SAO_SDA_PIN PB0
 
-// Define PB2 as the Button X input pin
+// Define PB2 as the Button X input pin and SAO SCL pin
 #define BUTTON_X_PIN PB2
+#define SAO_SCL_PIN PB2
+#define SAO_CLOCK_DETECT_INTERRUPT PCINT2
 
 // Define PB3 as the ADC input pin for the Team Identification
 #define ADC_INPUT_PIN PB3

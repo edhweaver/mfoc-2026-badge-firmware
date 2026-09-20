@@ -25,28 +25,525 @@
 
 //============================================================================
 //
-//   Phase 7: LED ON/OFF based on Button X Input on PB0 (pin 5)
+//   Phase 8: SAO Client with Read and Write Command support
 //
-//      Verify that the Button X Input on Pin 5 can read a can be debounced
-//   with Timer0 at a 0.4 second debounce time.
+//      SAO Client with a 16 Character input buffer is implemented with the
+//   Universal Serial Interface Peripheral.  The USI is setup in a Two-Wire
+//   state with SCL on PB2 (pin 7) and SDA on PB0 (pin 5).
 //
-//      When Button X Input is high, the WS2812 LED on PB1 (pin 6) will
-//   blink based on the ADC value.  When Button X Input is low, the WS2812
-//   remain off.
+//      First Byte of an SAO Write will switch the values of the SAO Read.
+//   The first byte of the SAO Read will match the first byte of the last
+//   SAO Write.  Subsequent bytes on the SAO Read will be generated as
+//   follows:
+//     - 0x00 - Badge Identification and Firmware Version
+//            - Byte 0x01 and greater - Firmware ID and Version
+//            - String is terminated with 0xFF
+//     - All other Values - null values of 0xFF per I2C standard behaivior
+//
+//      The Code for Switch Y and Button X have been left in the code
+//   however, the initialization code is disabled so the flags for the
+//   inputs will not change state.
 //
 //============================================================================
 
-// Switch debounce set to 40ms (5 interrupts at 8ms each)
-#define SWITCH_DEBOUNCE_COUNT 5
+#define FIRMWARE_ID "MFOC 2026 Badge V"
+#define FIRMWARE_VERSION "0.00a"
 
-// Button debounce set to 40ms (5 interrupts at 8ms each)
-#define BUTTON_DEBOUNCE_COUNT 5
+//============================================================================
+//
+// SAO Setup
+//
+//============================================================================
 
-// Loop count set to 200ms (25 interrupts at 8ms each)
-#define LOOP_COUNT 25
+// The SAO Client byte limit of a single transaction
+#define SAO_BUFFER_LIMIT                                                    24
 
+// The SAO Client will abandon a transaction stuck in the start condition
+#define SAO_START_CONDITION_TIMEOUT_USEC                                   500
+
+//============================================================================
+
+// Count of Timer 0 interrupts to debounce Switch Y
+#define SWITCH_DEBOUNCE_COUNT                                                5
+
+// Count of Timer 0 interrupts to debounce Switch X
+#define BUTTON_DEBOUNCE_COUNT                                                5
+
+// Count of Timer 0 interrupts to start a new loop cycle for the Main Loop
+#define LOOP_COUNT                                                          25
+
+//============================================================================
+
+// States for tracking behavior for each USI Interrupt
+enum sao_i2c_states {
+    SAO_CHECK_ADDRESS,
+    SAO_ACK_WRITE,
+    SAO_ACK_READ,
+    SAO_WRITE_DATA,
+    SAO_READ_DATA,
+    SAO_NACK_READ,
+    SAO_WAIT
+};
+
+// Define states for the NEC Transmitter behavior
+enum nec_transmission_states {
+    BADGE_SAO_ACTIVE_NEC_IDLE,
+    BADGE_NEC_TRIGGERED_VIA_SAO,
+    BADGE_NEC_TRIGGERED_VIA_BUTTON,
+    BADGE_NEC_TRIGGERED_VIA_IR,
+    BADGE_SAO_DISABLED
+};
+
+// Define states for the I2C SAO Port behavior
+enum sao_port_states {
+    SAO_PORT_I2C_ACTIVE,
+    SAO_PORT_I2C_DISABLED
+};
+
+//============================================================================
+//
+// Section: Global Variables
+//
+//      This section contains the variables used by the Main Loop and
+//   the Interrupt Service Routines.  The variables are declared as volatile
+//   to ensure that the compiler will refresh each variable from memory each
+//   time it is used.
+//
+//      This is required ensuring that the Main Loop and the Interrupt
+//   Service Routines are using the same values for each variable.
+//
+//============================================================================
+
+volatile uint8_t sao_device_address = 0;
+volatile uint8_t sao_buffer_index = 0;
+volatile uint8_t sao_buffer[SAO_BUFFER_LIMIT];
+volatile uint8_t sao_output_buffer[SAO_BUFFER_LIMIT];
 // Loop counter incremented by Timer 0 interrupt
 volatile uint8_t loop_counter = 0;
+
+volatile enum sao_i2c_states sao_state;
+
+//============================================================================
+//
+// Section: Macros for USI Control Register
+//
+//      This section contains Macros for managing the USI Control Register.
+//   Definitions are provided in a descriptive manner to ensure the proper
+//   configuration of the USI Control Register.
+//
+//============================================================================
+
+// USI Operates in Two-Wire Mode where SCL is held low during USI_OVF_vect
+#define USI_TWI_MODE                             (1 << USIWM1) | (1 << USIWM0)
+
+// USI is Disbled and USI pins are returned to GPIO functionality
+#define USI_DISABLED_MODE                        (0 << USIWM1) | (0 << USIWM0)
+
+// USI Overflow ISR uses SCL line with Edge Triggered 4-bit Counter
+#define USI_OVF_SRC_SCL_4BIT     (1 << USICS1) | (0 << USICS0) | (0 << USICLK)
+
+// USI Start Condition Interrupt is enabled
+#define USI_START_ISR                                            (1 << USISIE)
+
+// USI Counter Overflow Interrupt is enabled
+#define USI_OVERFLOW_ISR                                         (1 << USIOIE)
+
+// USI clear the Counter Overflow Interrupt Flag
+#define USI_CLEAR_OVERFLOW_FLAG                        USISR |= (1 << USIOIF);
+
+// Clear all USI Flags and Reset USI Counter to 0
+//  - Clear Start Condition Interrupt Flag
+//  - Clear Counter Overflow Interrupt Flag
+//  - Clear Stop Condition Flag
+//  - Clear Data Output Collision Flag
+//  - Reset USI counter to 0 (ready for 8 bits)
+#define USI_CLEAR_ALL_ISR_FLAGS                      USISR = (1 << USISIF) | \
+                                                             (1 << USIOIF) | \
+                                                              (1 << USIPF) | \
+                                                              (1 << USIDC) | \
+                                                               (0 << USICNT0);
+
+//============================================================================
+//
+// Section: Macros for SAO Management
+//
+//      This section contains Macros for managing the SAO Client. Definitions
+//   are provided in a descriptive manner to ensure the proper configuration
+//   and operation of the SAO CLient.
+//
+//============================================================================
+
+// Iniitalize SAO pins to check for Start Condition
+//  - Set SDA pin as an input
+//  - Set SCL pin as an input
+//  - Set SDA pull-up is disabled
+//  - Set SCL pull-up is disabled
+#define SAO_INITIALIZE_PINS                   DDRB &= ~((1 << SAO_SDA_PIN) | \
+                                                        (1 << SAO_SCL_PIN)); \
+                                             PORTB &= ~((1 << SAO_SDA_PIN) | \
+                                                          (1 << SAO_SCL_PIN));
+
+// Set SDA pin low for one Period
+//  - Set USI Data Register to 0x00
+//  - Set SDA pin to high (required to send data)
+//  - Set SDA pin direction to output
+//  - Clear Start Condition Flag
+//  - Clear Counter Overflow Flag
+//  - Clear Stop Condition Flag
+//  - Clear Data Output Collision Flag
+//  - Reset USI counter to 14 (ready for 1 bit)
+#define SAO_SEND_ACK                             DDRB |= (1 << SAO_SDA_PIN); \
+                                                               USIDR = 0x00; \
+                                                     USISR = (1 << USISIF) | \
+                                                             (1 << USIOIF) | \
+                                                              (1 << USIPF) | \
+                                                              (1 << USIDC) | \
+                                                              (14 << USICNT0);
+
+// Set SDA pin high for one Period
+//  - Set USI Data Register to 0xFF
+//  - Set SDA pin to High (required to send data)
+//  - Set SDA pin direction to output
+//  - Clear Start Condition Flag
+//  - Clear Counter Overflow Flag
+//  - Clear Stop Condition Flag
+//  - Clear Data Output Collision Flag
+//  - Reset USI counter to 14 (ready for 1 bit)
+#define SAO_SEND_NACK                                          USIDR = 0xFF; \
+                                                PORTB |= (1 << SAO_SDA_PIN); \
+                                                 DDRB |= (1 << SAO_SDA_PIN); \
+                                                     USISR = (1 << USISIF) | \
+                                                             (1 << USIOIF) | \
+                                                              (1 << USIPF) | \
+                                                              (1 << USIDC) | \
+                                                              (14 << USICNT0);
+
+// Set SDA pin to read for one period
+//  - Set SDA pin direction to input
+//  - Clear Counter Overflow Flag
+//  - Reset USI counter to 14 (ready for 1 bit)
+#define SAO_RECEIVE_ACK                         DDRB &= ~(1 << SAO_SDA_PIN); \
+                                      USISR = (1 << USIOIF) | (14 << USICNT0);
+
+// Set SDA pin to read for eight periods where data will be written to USIDR
+//  - Set SDA pin direction to input
+//  - Clear Start Condition Flag
+//  - Clear Counter Overflow Flag
+//  - Clear Stop Condition Flag
+//  - Clear Data Output Collision Flag
+//  - Reset USI counter to 14 (ready for 1 bit)
+#define SAO_RECEIVE_DATA_IN_USIDR               DDRB &= ~(1 << SAO_SDA_PIN); \
+                                                     USISR = (1 << USISIF) | \
+                                                             (1 << USIOIF) | \
+                                                              (1 << USIPF) | \
+                                                              (1 << USIDC) | \
+                                                               (0 << USICNT0);
+
+// Set SDA pin to write for eight periods with data in USIDR
+//  - Set SDA pin to High (required to send data)
+//  - Set SDA pin direction to output
+//  - Clear Start Condition Flag
+//  - Clear Counter Overflow Flag
+//  - Clear Stop Condition Flag
+//  - Clear Data Output Collision Flag
+//  - Reset USI counter to 14 (ready for 1 bit)
+#define SAO_SEND_DATA_IN_USIDR                  PORTB |= (1 << SAO_SDA_PIN); \
+                                                 DDRB |= (1 << SAO_SDA_PIN); \
+                                                     USISR = (1 << USISIF) | \
+                                                             (1 << USIOIF) | \
+                                                              (1 << USIPF) | \
+                                                              (1 << USIDC) | \
+                                                               (0 << USICNT0);
+
+// Monitor SDA pin for new I2C Frames
+//  - Set SDA pin direction to input
+#define SAO_MONITOR_FOR_FRAMES                    DDRB &= ~(1 << SAO_SDA_PIN);
+
+// Setup USI to be disabled
+//  - Clear the USI Overflow Interrupt Flag
+// Enable GPIO Interrupt for SCL Pin
+#define SAO_DISABLED                             USICR =  USI_DISABLED_MODE; \
+                                                    USI_CLEAR_OVERFLOW_FLAG; \
+                                    PCMSK |= (1 << SAO_CLOCK_DETECT_INTERRUPT);
+
+// Disable GPIO Interrupt for SCL Pin
+#define SAO_ENABLED                PCMSK &= ~(1 << SAO_CLOCK_DETECT_INTERRUPT);
+
+
+// Setup USI for SAO with no Interrupts Enabled
+//  - Set USI_OVF_vect with Edge Triggered 4-bit Counter on SCL
+//  - Clear the USI Overflow Interrupt Flag
+#define SAO_INTERRUPT_DISABLED                 USICR = USI_OVF_SRC_SCL_4BIT; \
+                                                      USI_CLEAR_OVERFLOW_FLAG;
+
+// Setup USI for SAO when I2C Frame is not Present
+//  - Enable Start Condition Interrupt
+//  - Disable all other USI Interrupts
+//  - Set USI to Two-Wire Mode where SCL is held low on USI_OVF_vect
+//  - Set USI_OVF_vect with Edge Triggered 4-bit Counter on SCL
+//  - Clear the USI Overflow Interrupt Flag
+//  - Setup the SDA pin as an Input
+//  - Setup SAO State Machine to Monitor for Start of Frame
+#define SAO_INTERRUPT_ON_START_CONDITION             USICR = USI_START_ISR | \
+                                                              USI_TWI_MODE | \
+                                                         USI_OVF_SRC_SCL_4BIT;
+
+// Setup USI for SAO when ingesting an I2C Frame
+//  - Enable Start Condition Interrupt
+//  - Enable Counter Overflow Interrupt
+//  - Disable all other USI Interrupts
+//  - Set USI to Two-Wire Mode where SCL is held low on USI_OVF_vect
+//  - Set USI_OVF_vect with Edge Triggered 4-bit Counter on SCL
+#define SAO_INTERRUPT_ON_BYTE_CAPTURE                USICR = USI_START_ISR | \
+                                                          USI_OVERFLOW_ISR | \
+                                                              USI_TWI_MODE | \
+                                                         USI_OVF_SRC_SCL_4BIT;
+
+// Check SAO Pin states
+#define SAO_PIN_SDA_HIGH                             PINB & (1 << SAO_SDA_PIN)
+#define SAO_PIN_SDA_LOW                           !(PINB & (1 << SAO_SDA_PIN))
+#define SAO_PIN_SCL_HIGH                             PINB & (1 << SAO_SCL_PIN)
+#define SAO_PIN_SCL_LOW                           !(PINB & (1 << SAO_SCL_PIN))
+
+// Start SAO Client
+#define SAO_START                                     SAO_CLEAR_CLOCK_DETECT \
+                                                                   SAO_ENABLED
+
+// Stop SAO Client
+#define SAO_STOP                                   SAO_CLEAR_INTERRUPT_FLAGS \
+                                                                  SAO_DISABLED
+
+// Check if SAO Client is stopped
+#define SAO_NOT_ACTIVE                                !(USICR & USI_START_ISR)
+#define SAO_ACTIVE                                     (USICR & USI_START_ISR)
+
+// Updated Flag Management Macros for SAO Client
+#define SAO_CLOCK_DETECTED                        READ_FLAG__SAO_STATE_TRIGGER
+#define SAO_CLEAR_CLOCK_DETECT                   CLEAR_FLAG__SAO_STATE_TRIGGER
+#define SAO_FRAME_DETECTED                        READ_FLAG__SAO_STATE_TRIGGER
+#define SAO_CLEAR_FRAME_DETECT                   CLEAR_FLAG__SAO_STATE_TRIGGER
+#define SAO_CLEAR_INTERRUPT_FLAGS                CLEAR_FLAG__SAO_STATE_TRIGGER
+
+//============================================================================
+
+void i2c_device_init(uint8_t address) {
+
+    uint8_t counter;
+
+    SAO_START
+
+    for (counter = 0; counter < SAO_BUFFER_LIMIT; counter++)
+    {
+        sao_buffer[counter] = 0xFF;
+        sao_output_buffer[counter] = 0xFF;
+    }
+
+    sao_device_address = address;
+
+    SAO_INITIALIZE_PINS
+
+    USI_CLEAR_ALL_ISR_FLAGS
+
+    SAO_INTERRUPT_ON_START_CONDITION
+
+    sao_state = SAO_CHECK_ADDRESS;
+}
+
+ISR(USI_START_vect) {
+    uint8_t i2c_start_condition_active = 1U;
+    uint8_t i2c_frame_started = 0U;
+    uint32_t time_out_counter = 0U;
+
+    // Set state machine to check to check for the SAO Device Address
+    sao_state = SAO_CHECK_ADDRESS;
+
+    // Wait for the start condition to finish
+    while (i2c_start_condition_active) {
+
+        if (time_out_counter > SAO_START_CONDITION_TIMEOUT_USEC) {
+            i2c_start_condition_active = 0;
+            CLEAR_FLAG__I2C_ACTIVE
+        }
+        else if (SAO_PIN_SDA_HIGH) {
+            i2c_start_condition_active = 0;
+            CLEAR_FLAG__I2C_ACTIVE
+        }
+        else if (SAO_PIN_SCL_LOW) {
+            i2c_frame_started = 1;
+            i2c_start_condition_active = 0;
+            CLEAR_FLAG__I2C_ACTIVE
+        }
+        else {
+            i2c_start_condition_active = 1;
+            SET_FLAG__I2C_ACTIVE
+        }
+
+        time_out_counter = time_out_counter + 1;
+
+        _delay_us(1);
+    }
+
+    // Clear all USI Flags, Overflow Counter reset to 16 Edge changes
+    USI_CLEAR_ALL_ISR_FLAGS
+
+    // Setup USI when actively processing I2C Frame
+    if (i2c_frame_started == 1) {
+        SAO_INTERRUPT_ON_BYTE_CAPTURE
+    }
+}
+
+ISR(USI_OVF_vect) {
+
+    switch (sao_state) {
+        case SAO_CHECK_ADDRESS:
+            // Check if frame matches the 7-bit SAO Device Address
+            if ((USIDR >> 1) == sao_device_address) {
+                // Check if frame is a Read Transaction or Write Transaction
+                if (USIDR & 0x01) {
+                    // Read Transaction
+                    sao_state = SAO_ACK_READ;
+                } else {
+                    // Write Transaction
+                    sao_state = SAO_ACK_WRITE;
+                }
+                sao_buffer_index = 1;
+                SAO_SEND_ACK
+            } else {
+                SAO_INTERRUPT_ON_START_CONDITION
+                SAO_INITIALIZE_PINS
+                sao_state = SAO_CHECK_ADDRESS;
+                CLEAR_FLAG__I2C_ACTIVE
+            }
+            break;
+        case SAO_ACK_WRITE:
+            SAO_RECEIVE_DATA_IN_USIDR
+            sao_state = SAO_WRITE_DATA;
+            break;
+        case SAO_WRITE_DATA:
+            if (sao_buffer_index < SAO_BUFFER_LIMIT) {
+                sao_buffer[sao_buffer_index - 1] = USIDR;
+                sao_state = SAO_ACK_WRITE;
+                SAO_SEND_ACK
+                sao_buffer_index++;
+            } else {
+                SAO_SEND_NACK
+                sao_state = SAO_NACK_READ;
+                CLEAR_FLAG__I2C_ACTIVE
+            }
+            break;
+        case SAO_READ_DATA:
+            if (sao_buffer_index <= SAO_BUFFER_LIMIT) {
+                sao_state = SAO_ACK_READ;
+                SAO_RECEIVE_ACK
+            } else {
+                SAO_SEND_NACK
+                sao_state = SAO_NACK_READ;
+                CLEAR_FLAG__I2C_ACTIVE
+            }
+            break;
+        case SAO_ACK_READ:
+            if (sao_buffer_index <= SAO_BUFFER_LIMIT) {
+                USIDR = sao_output_buffer[sao_buffer_index - 1];
+                switch(sao_output_buffer[0]) {
+                    default:
+                        sao_output_buffer[sao_buffer_index] = 0xFF;
+                        break;
+                    case 0x00U:
+                        switch (sao_buffer_index) {
+                            case 1:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[0];
+                                break;
+                            case 2:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[1];
+                                break;
+                            case 3:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[2];
+                                break;
+                            case 4:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[3];
+                                break;
+                            case 5:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[4];
+                                break;
+                            case 6:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[5];
+                                break;
+                            case 7:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[6];
+                                break;
+                            case 8:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[7];
+                                break;
+                            case 9:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[8];
+                                break;
+                            case 10:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[9];
+                                break;
+                            case 11:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[10];
+                                break;
+                            case 12:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[11];
+                                break;
+                            case 13:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[12];
+                                break;
+                            case 14:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[13];
+                                break;
+                            case 15:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[14];
+                                break;
+                            case 16:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[15];
+                                break;
+                            case 17:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[16];
+                                break;
+                            case 18:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_VERSION[0];
+                                break;
+                            case 19:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_VERSION[1];
+                                break;
+                            case 20:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_VERSION[2];
+                                break;
+                            case 21:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_VERSION[3];
+                                break;
+                            case 22:
+                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_VERSION[4];
+                                break;
+                            default:
+                                sao_output_buffer[sao_buffer_index] = 0xFF;
+                                break;
+                        }
+                        break;
+                }
+                sao_buffer_index++;
+                sao_state = SAO_READ_DATA;
+                SAO_SEND_DATA_IN_USIDR
+            } else {
+                sao_state = SAO_NACK_READ;
+                SAO_SEND_NACK
+                CLEAR_FLAG__I2C_ACTIVE
+            }
+            break;
+        default:
+            SAO_INTERRUPT_ON_START_CONDITION
+            SAO_INITIALIZE_PINS
+            sao_state = SAO_CHECK_ADDRESS;
+            CLEAR_FLAG__I2C_ACTIVE
+            break;
+    }
+    USISR |= (1 << USIOIF);
+
+    SET_FLAG__SAO_STATE_TRIGGER
+}
+
+//============================================================================
 
 /* Timer/Counter0 Compare Match A */
 ISR(TIMER0_COMPA_vect) {
@@ -163,6 +660,8 @@ uint8_t adc_read() {
     return ADCH; // Return 8-bit value
 }
 
+//============================================================================
+
 /* Initialize the Switch Y Input */
 void switch_y_init() {
     DDRB &= ~(1 << SWITCH_Y_PIN);
@@ -174,24 +673,9 @@ void button_x_init() {
     DDRB &= ~(1 << BUTTON_X_PIN);
 }
 
-int main(void) {
+//============================================================================
 
-    CLEAR_ALL_FLAGS
-
-    // Add State Machine State Variable
-    uint8_t state = 0;
-
-    // Add State Machine for WS2812 LED
-    enum led_colors next_led_state;
-
-    // Add RGB Color Values for WS2812 LED
-    uint8_t led_value_red = 255U;
-    uint8_t led_value_green = 0U;
-    uint8_t led_value_blue = 0U;
-
-    // Initialize the ADC Input
-    uint8_t adc_value = 0U;
-
+void initialize(void) {
     //initialize Timer0 for 8ms interrupts
     timer0_init();
 
@@ -207,11 +691,39 @@ int main(void) {
     // Initialize the Button X Input
     button_x_init();
 
+    SAO_CLEAR_INTERRUPT_FLAGS
+
     // set processor to sleep mode idle to save power between interrupts
     set_sleep_mode(SLEEP_MODE_IDLE);
 
+    // Enable global interrupts
+    sei();
+}
+
+int main(void) {
+
+    // Add State Machine State Variable
+    uint8_t state = 0;
+
+    // Add State Machine for WS2812 LED
+    enum led_colors next_led_state = COLOR_WHITE;
+
+    // Add RGB Color Values for WS2812 LED
+    uint8_t led_value_red = 255U;
+    uint8_t led_value_green = 255U;
+    uint8_t led_value_blue = 255U;
+
+    // Initialize the ADC Input
+    uint8_t adc_value = 0U;
+
+    initialize();
+
+    CLEAR_ALL_FLAGS
+
     // Initialize the loop counter
     loop_counter = 0;
+
+    i2c_device_init(0x42);
 
     // Enable global interrupts
     sei();
@@ -223,7 +735,8 @@ int main(void) {
         // Set WS2812 LED Color
         ws2812_set_color(led_value_red, led_value_green, led_value_blue);
 
-        // Hold for 2 Timer 0 interrupt (16 milliseconds)
+        // Hold for 2 Timer 0 interrupt (16 milliseconds) to resynch the loop
+        //   Setting the WS2812 LED color takes up to 12 milliseconds
         while(loop_counter < 2) {
             // Sleep until Next Interrupt
             cli();
@@ -274,7 +787,6 @@ int main(void) {
     }
 
         // Sets led color values based on current led state
-        // Sets next led state based on current led state
         switch(next_led_state) {
             case COLOR_VIOLET:
                 led_value_red = 255U;
