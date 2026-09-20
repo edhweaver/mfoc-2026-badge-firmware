@@ -30,7 +30,7 @@
 //                            .----------------.
 //                  RESET 1 --| PB5        VCC |-- 8
 //                 ADC-IN 2 --| PB3        PB2 |-- 7 BUTTON-X/SCL
-//                        3 --| PB4        PB1 |-- 6 WS2812
+//                 NEC-IN 3 --| PB4        PB1 |-- 6 WS2812
 //                        4 --| GND        PB0 |-- 5 SWITCH-Y/SDA
 //                            '----------------'
 //
@@ -67,6 +67,10 @@
 // Define PB3 as the ADC input pin for the Team Identification
 #define ADC_INPUT_PIN PB3
 #define ADC_INPUT_CHANNEL 3U
+
+// Define PB4 as the IR Receiver Pin
+#define IR_RECEIVER_PIN PB4
+#define IR_RECEIVER_INTERRUPT PCINT4
 
 // Define PB1 as the Data pin for the WS2812 LED
 #define WS2812_DIO_PIN PB1

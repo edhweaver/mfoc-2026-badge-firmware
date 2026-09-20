@@ -25,11 +25,11 @@
 
 //============================================================================
 //
-//   Phase 8: SAO Client with Read and Write Command support
+//   Phase 9: Receive NEC Frames via IR and store on SAO Client Interface
 //
-//      SAO Client with a 16 Character input buffer is implemented with the
-//   Universal Serial Interface Peripheral.  The USI is setup in a Two-Wire
-//   state with SCL on PB2 (pin 7) and SDA on PB0 (pin 5).
+//      NEC-IN Input will decode a filtered infrared signal and will store
+//   the values internally in RAM.  The SAO Client can be used to read the
+//   last stored NEC Frame by reading 3 bytes.
 //
 //      First Byte of an SAO Write will switch the values of the SAO Read.
 //   The first byte of the SAO Read will match the first byte of the last
@@ -38,6 +38,10 @@
 //     - 0x00 - Badge Identification and Firmware Version
 //            - Byte 0x01 and greater - Firmware ID and Version
 //            - String is terminated with 0xFF
+//     - 0x01 - NEC Receiver information
+//            - Values in 0x01 and 0x02 - NEC Frame Address
+//            - Value in 0x03 - NEC Frame Command
+//            - Value in 0x04 - Age of the last Received NEC Frame
 //     - All other Values - null values of 0xFF per I2C standard behaivior
 //
 //      The Code for Switch Y and Button X have been left in the code
@@ -47,7 +51,7 @@
 //============================================================================
 
 #define FIRMWARE_ID "MFOC 2026 Badge V"
-#define FIRMWARE_VERSION "0.00a"
+#define FIRMWARE_VERSION "0.01a"
 
 //============================================================================
 //
@@ -69,8 +73,15 @@
 // Count of Timer 0 interrupts to debounce Switch X
 #define BUTTON_DEBOUNCE_COUNT                                                5
 
+// Maximum Age of the NEC Input Capture before it is considered stale
+#define NEC_INPUT_CAPTURE_MAX_AGE                                          254
+
 // Count of Timer 0 interrupts to start a new loop cycle for the Main Loop
 #define LOOP_COUNT                                                          25
+
+#define NEC_INPUT_BUFFER_LIMIT                                              70
+
+#define NEC_PIN_SNAPSHOT_BUFFER_LIMIT                                       36
 
 //============================================================================
 
@@ -114,14 +125,23 @@ enum sao_port_states {
 //
 //============================================================================
 
+// Variables to hold the NEC code from IR Receiver
+volatile uint8_t nec_input_command;
+volatile uint16_t nec_input_address;
+volatile uint8_t nec_input_capture_age;
+
 volatile uint8_t sao_device_address = 0;
 volatile uint8_t sao_buffer_index = 0;
 volatile uint8_t sao_buffer[SAO_BUFFER_LIMIT];
 volatile uint8_t sao_output_buffer[SAO_BUFFER_LIMIT];
+volatile uint8_t pulse_buffer[NEC_PIN_SNAPSHOT_BUFFER_LIMIT];
+
 // Loop counter incremented by Timer 0 interrupt
 volatile uint8_t loop_counter = 0;
 
 volatile enum sao_i2c_states sao_state;
+
+queue_t nec_input_queue;
 
 //============================================================================
 //
@@ -521,6 +541,25 @@ ISR(USI_OVF_vect) {
                                 break;
                         }
                         break;
+                    case 0x01U:
+                        switch (sao_buffer_index) {
+                            case 1:
+                                sao_output_buffer[1] = (uint8_t) ((nec_input_address & 0xFF00U) >> 8);
+                                break;
+                            case 2:
+                                sao_output_buffer[2] = (uint8_t) (nec_input_address & 0x00FFU);
+                                break;
+                            case 3:
+                                sao_output_buffer[3] = nec_input_command;
+                                break;
+                            case 4:
+                                sao_output_buffer[4] = nec_input_capture_age;
+                                break;
+                            default:
+                                sao_output_buffer[sao_buffer_index] = 0xFF;
+                                break;
+                        }
+                        break;
                 }
                 sao_buffer_index++;
                 sao_state = SAO_READ_DATA;
@@ -619,6 +658,69 @@ ISR(TIMER0_COMPA_vect) {
     }
 }
 
+/* Timer/Counter1 Compare Match A */
+ISR(TIMER1_COMPA_vect) {
+
+    static uint8_t nec_time_counter = 0;
+
+    // Check if the NEC time counter needs to be reset NEC input ISR
+    if (READ_FLAG__NEC_IN_RESTART_COUNT) {
+        // Clear the NEC time counter restart flag
+        CLEAR_FLAG__NEC_IN_RESTART_COUNT
+
+        // Reset the NEC time counter
+        nec_time_counter = 0;
+    }
+
+    // Update flags after reseting the nec time counter for the initial
+    //    12.5 msec to 13.0 msec
+    if (nec_time_counter <= 30) {
+
+        // Update flags based on time since nec time counter reset
+        if (nec_time_counter == 3) {
+            // Flag time after 1.5 msec and before 2.0 msec
+            SET_FLAG__NEC_IN_DETECT_1
+        }
+        else if (nec_time_counter == 16) {
+            // Flag time after 8.0 msec and before 8.5 msec
+            SET_FLAG__NEC_IN_HEADER_0
+        }
+        else if (nec_time_counter == 24) {
+            // Flag time after 12.0 msec and before 12.5 msec
+            SET_FLAG__NEC_IN_HEADER_1
+        }
+        else if (nec_time_counter == 30) {
+            // Flag time after 15.0 msec
+            SET_FLAG__NEC_IN_LIMIT_COUNT
+        }
+
+        // Increment the NEC time counter every interrupt (0.5 second interval)
+        nec_time_counter++;
+    }
+}
+
+//============================================================================
+
+ISR(PCINT0_vect) {
+    uint8_t nec_timing_flags;
+
+    if (!(PINB & (1 << IR_RECEIVER_PIN))) {
+        nec_timing_flags = NEC_INPUT_LOW_TIMING_FLAGS;
+
+        // Reset the NEC Time Counter
+        SET_FLAG__NEC_IN_RESTART_COUNT
+
+        // Clear all NEC Timing Flags
+        CLEAR_FLAG__NEC_IN_ALL_TIMING_FLAGS
+    } else {
+        nec_timing_flags = NEC_INPUT_HIGH_TIMING_FLAGS;
+    }
+
+    Queue_Inject(&nec_input_queue, nec_timing_flags);
+}
+
+//============================================================================
+
 /* Initialize Timer0 */
 void timer0_init() {
     // Set CTC Mode (WGM01=1, WGM00=0)
@@ -637,6 +739,25 @@ void timer0_init() {
     // CS02 = 1, CS01 = 0, CS00 = 0
     TCCR0B = (1 << CS02);
 }
+
+/* Initialize Timer1 */
+void timer1_init() {
+
+    // Timer1 Clock Prescaler to 16 (CS13=0, CS12=1, CS11=0, CS10=1)
+    // Timer1 clear the counter on compare match with OCR1A (CTC1=1)
+    TCCR1 = (1 << CS12) | (1 << CS10) | (1 << CTC1);
+
+    // Clear Timer1 counter
+    TCNT1 = 0;
+
+    // Set Compare Match value for 0.5 msec
+    OCR1A = 249;
+
+    // Enable the Compare Match A interrupt
+    TIMSK |= (1 << OCIE1A);
+}
+
+//============================================================================
 
 /* Initialize the ADC Input */
 void adc_init() {
@@ -679,8 +800,14 @@ void initialize(void) {
     //initialize Timer0 for 8ms interrupts
     timer0_init();
 
+    //initialize Timer0 for 0.5ms interrupts
+    timer1_init();
+
     // Initialize the ADC Input
     adc_init();
+
+    // Initialize the IR Receiver pin
+    receiver_nec_set_pin();
 
     // Initialize the WS2812 DI pin
     ws2812_set_di_pin();
@@ -695,6 +822,8 @@ void initialize(void) {
 
     // set processor to sleep mode idle to save power between interrupts
     set_sleep_mode(SLEEP_MODE_IDLE);
+
+    SET_FLAG__NEC_IN_RESTART_COUNT
 
     // Enable global interrupts
     sei();
@@ -716,12 +845,26 @@ int main(void) {
     // Initialize the ADC Input
     uint8_t adc_value = 0U;
 
+    uint8_t nec_input_buffer[NEC_INPUT_BUFFER_LIMIT];
+    nec_code_parser_t nec_input_data;
+
+    // Initialize the Global NEC receiver variables
+    nec_input_address = 0x0000U;
+    nec_input_command = 0x00U;
+    nec_input_capture_age = NEC_INPUT_CAPTURE_MAX_AGE;
+
     initialize();
+
+    Queue_Initialize(&nec_input_queue, nec_input_buffer, NEC_INPUT_BUFFER_LIMIT);
+
+    nec_input_initialize(&nec_input_data);
 
     CLEAR_ALL_FLAGS
 
     // Initialize the loop counter
     loop_counter = 0;
+
+    SET_FLAG__NEC_IN_RESTART_COUNT
 
     i2c_device_init(0x42);
 
@@ -729,6 +872,7 @@ int main(void) {
     sei();
 
     while(1) {
+
         // Read the ADC value
         adc_value = adc_read();
 
@@ -769,6 +913,14 @@ int main(void) {
             case 3:
             case 5:
             case 7:
+                if (nec_input_command == 0x00U) {
+                    next_led_state = COLOR_BLACK;
+                } else if (nec_input_command == 0x02U) {
+                    next_led_state = COLOR_WHITE;
+                } else {
+                    next_led_state = COLOR_YELLOW;
+                }
+                break;
             case 9:
             default:
                 next_led_state = COLOR_BLACK;
@@ -829,6 +981,11 @@ int main(void) {
                 led_value_green = 0U;
                 led_value_blue = 0U;
                 break;
+        }
+
+        if (nec_input_capture_age < NEC_INPUT_CAPTURE_MAX_AGE) {
+            // Increment the NEC input capture age if it is less than the maximum
+            nec_input_capture_age++;
         }
 
         // Hold for Loop Period

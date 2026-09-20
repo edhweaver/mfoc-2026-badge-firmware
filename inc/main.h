@@ -29,6 +29,8 @@
 #include <avr/sleep.h>
 #include "pin_config.h"
 #include "gpio_ws2812.h"
+#include "gpio_ir_nec.h"
+#include "queue.h"
 
 //============================================================================
 //
@@ -50,6 +52,39 @@
 // Register used to capture flags
 register uint8_t timer_1_flags __asm__("r2");
 register uint8_t timer_2_flags __asm__("r3");
+
+// Flag is Active when time between state changes of the NEC Input is long
+//    enough for the active pulse section of the Leader Code
+#define SET_FLAG__NEC_IN_HEADER_0                   timer_1_flags |= (1 << 0);
+#define CLEAR_FLAG__NEC_IN_HEADER_0                timer_1_flags &= ~(1 << 0);
+#define READ_FLAG__NEC_IN_HEADER_0                    timer_1_flags & (1 << 0)
+
+// Flag is Active when time between state changes of the NEC Input is long
+//    enough for the no pulse section of the Leader Code
+#define SET_FLAG__NEC_IN_HEADER_1                   timer_1_flags |= (1 << 1);
+#define CLEAR_FLAG__NEC_IN_HEADER_1                timer_1_flags &= ~(1 << 1);
+#define READ_FLAG__NEC_IN_HEADER_1                    timer_1_flags & (1 << 1)
+
+// Flag is Active when time between state changes of the NEC Input is long
+//    enough for the no pulse section of a data bit to be a value of '1'
+#define SET_FLAG__NEC_IN_DETECT_1                   timer_1_flags |= (1 << 2);
+#define CLEAR_FLAG__NEC_IN_DETECT_1                timer_1_flags &= ~(1 << 2);
+#define READ_FLAG__NEC_IN_DETECT_1                    timer_1_flags & (1 << 2)
+
+// Flag is Active when time between state changes of the NEC Input is long
+#define SET_FLAG__NEC_IN_LIMIT_COUNT                timer_1_flags |= (1 << 3);
+#define CLEAR_FLAG__NEC_IN_LIMIT_COUNT             timer_1_flags &= ~(1 << 3);
+#define READ_FLAG__NEC_IN_LIMIT_COUNT                 timer_1_flags & (1 << 3)
+
+#define CLEAR_FLAG__NEC_IN_ALL_TIMING_FLAGS             timer_1_flags &= 0xF0;
+
+#define NEC_INPUT_LOW_TIMING_FLAGS             ((timer_1_flags & 0x0F) | 0x10)
+#define NEC_INPUT_HIGH_TIMING_FLAGS            ((timer_1_flags & 0x0F) | 0x20)
+
+// Flag is Active when NEC Input state changes
+#define SET_FLAG__NEC_IN_RESTART_COUNT              timer_1_flags |= (1 << 4);
+#define CLEAR_FLAG__NEC_IN_RESTART_COUNT           timer_1_flags &= ~(1 << 4);
+#define READ_FLAG__NEC_IN_RESTART_COUNT               timer_1_flags & (1 << 4)
 
 // Flag is Active when Switch 1 debounced state is High
 #define SET_FLAG__SWITCH_Y_ON                       timer_1_flags |= (1 << 5);
@@ -80,6 +115,13 @@ register uint8_t timer_2_flags __asm__("r3");
 #define SET_FLAG__I2C_ACTIVE                        timer_2_flags |= (1 << 1);
 #define CLEAR_FLAG__I2C_ACTIVE                     timer_2_flags &= ~(1 << 1);
 #define READ_FLAG__I2C_ACTIVE                         timer_2_flags & (1 << 1)
+
+// Flag is Active when NEC Receiver is active
+#define SET_FLAG__NEC_RECEIVER_ACTIVE               timer_2_flags |= (1 << 2);
+#define CLEAR_FLAG__NEC_RECEIVER_ACTIVE            timer_2_flags &= ~(1 << 2);
+#define READ_FLAG__NEC_RECEIVER_ACTIVE                timer_2_flags & (1 << 2)
+
+#define READ_FLAG__TIME_CRITICAL_ACTIVE             timer_2_flags & 0b00000110
 
 #define CLEAR_ALL_FLAGS                                  timer_1_flags = 0U; \
                                                            timer_2_flags = 0U;
