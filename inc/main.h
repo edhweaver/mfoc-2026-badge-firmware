@@ -30,4 +30,38 @@
 #include "pin_config.h"
 #include "gpio_ws2812.h"
 
+//============================================================================
+//
+// Section: Macros for Flag Management
+//
+//      This section contains Macros for Setting, Clearing and Checking Flag
+//   for asynchronus communication between an Interrupt Service Routine and
+//   other functions.  All Macro calls outside of an ISR must have one of the
+//   the following conditions to ensure that the Macros are Atomic:
+//      - Interrupts are disabled prior to the call
+//      - The Variable used by the macro is declared as a register
+//
+//      All Macro Calls inside an ISR are already Atomic due to further
+//   Interrupts being disabled while executing an ISR in the AVR
+//   hardware architecture.
+//
+//============================================================================
+
+// Register used to capture flags
+register uint8_t timer_1_flags __asm__("r2");
+
+// Flag is Active when Switch 1 debounced state is High
+#define SET_FLAG__SWITCH_Y_ON                       timer_1_flags |= (1 << 5);
+#define CLEAR_FLAG__SWITCH_Y_ON                    timer_1_flags &= ~(1 << 5);
+#define READ_FLAG__SWITCH_Y_ON                        timer_1_flags & (1 << 5)
+
+// Flag is Active when Switch Y debounced state is Low
+#define SET_FLAG__SWITCH_Y_OFF                      timer_1_flags |= (1 << 6);
+#define CLEAR_FLAG__SWITCH_Y_OFF                   timer_1_flags &= ~(1 << 6);
+#define READ_FLAG__SWITCH_Y_OFF                       timer_1_flags & (1 << 6)
+
+#define CLEAR_ALL_FLAGS                                    timer_1_flags = 0U;
+
+//============================================================================
+
 #endif /* MAIN_H */

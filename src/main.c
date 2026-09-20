@@ -25,18 +25,19 @@
 
 //============================================================================
 //
-//   Phase 5: Blink LED color based on ADC Input on PB3 (pin 2)
+//   Phase 6: LED ON/OFF based on Switch Y Input on PB2 (pin 7)
 //
-//      Verify that the ADC Input on Pin 2 can read a voltage from 0V to Vcc
-//   by updating the WS2812 LED color based on the ADC value.  The ADC input
-//   will effect the color of the WS2812 LED based on the following ranges:
-//     - 0x00 to 0x2A: Green
-//     - 0x2B to 0x69: Aqua
-//     - 0x6A to 0x94: Blue
-//     - 0x95 to 0xD4: Violet
-//     - 0xD5 to 0xFF: Red
+//      Verify that the Switch Y Input on Pin 7 can read a can be debounced
+//   with Timer0 at a 0.4 second debounce time.
+//
+//      When Switch Y Input is high, the WS2812 LED on PB1 (pin 6) will
+//   blink based on the ADC value.  When Switch Y Input is low, the WS2812
+//   remain off.
 //
 //============================================================================
+
+// Switch debounce set to 40ms (5 interrupts at 8ms each)
+#define SWITCH_DEBOUNCE_COUNT 5
 
 // Loop count set to 200ms (25 interrupts at 8ms each)
 #define LOOP_COUNT 25
@@ -46,8 +47,35 @@ volatile uint8_t loop_counter = 0;
 
 /* Timer/Counter0 Compare Match A */
 ISR(TIMER0_COMPA_vect) {
+    static uint8_t switch_y_high_counter = 0;
+    static uint8_t switch_y_low_counter = 0;
+
     if (loop_counter < 255U) {
         loop_counter++;
+    }
+
+    // Clear Switch Y relevant counter based on Switch Y GPIO state 
+    if (PINB & (1 << SWITCH_Y_PIN)) {
+        // Increment high counter until debounced
+        if (switch_y_high_counter <= SWITCH_DEBOUNCE_COUNT) {
+            switch_y_high_counter++;
+        }
+        // Clear low counter
+        switch_y_low_counter = 0;
+    } else {
+        // Clear high counter
+        switch_y_high_counter = 0;
+        // Increment low counter until debounced
+        if (switch_y_low_counter <= SWITCH_DEBOUNCE_COUNT) {
+            switch_y_low_counter++;
+        }
+    }
+
+    // Edge trigger of debounced switch change
+    if (switch_y_low_counter >= SWITCH_DEBOUNCE_COUNT) {
+        SET_FLAG__SWITCH_Y_ON;
+    } else {
+        CLEAR_FLAG__SWITCH_Y_ON;
     }
 }
 
@@ -92,7 +120,14 @@ uint8_t adc_read() {
     return ADCH; // Return 8-bit value
 }
 
+/* Initialize the Switch Y Input */
+void switch_y_init() {
+    DDRB &= ~(1 << SWITCH_Y_PIN);
+}
+
 int main(void) {
+
+    CLEAR_ALL_FLAGS
 
     // Add State Machine State Variable
     uint8_t state = 0;
@@ -116,6 +151,9 @@ int main(void) {
 
     // Initialize the WS2812 DI pin
     ws2812_set_di_pin();
+
+    // Initialize the Switch Y Input
+    switch_y_init();
 
     // set processor to sleep mode idle to save power between interrupts
     set_sleep_mode(SLEEP_MODE_IDLE);
@@ -178,6 +216,10 @@ int main(void) {
         } else {
             state = 0;
         }
+
+    if (READ_FLAG__SWITCH_Y_ON) {
+        next_led_state = COLOR_BLACK;
+    }
 
         // Sets led color values based on current led state
         // Sets next led state based on current led state
