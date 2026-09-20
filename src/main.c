@@ -25,19 +25,22 @@
 
 //============================================================================
 //
-//   Phase 6: LED ON/OFF based on Switch Y Input on PB2 (pin 7)
+//   Phase 7: LED ON/OFF based on Button X Input on PB0 (pin 5)
 //
-//      Verify that the Switch Y Input on Pin 7 can read a can be debounced
+//      Verify that the Button X Input on Pin 5 can read a can be debounced
 //   with Timer0 at a 0.4 second debounce time.
 //
-//      When Switch Y Input is high, the WS2812 LED on PB1 (pin 6) will
-//   blink based on the ADC value.  When Switch Y Input is low, the WS2812
+//      When Button X Input is high, the WS2812 LED on PB1 (pin 6) will
+//   blink based on the ADC value.  When Button X Input is low, the WS2812
 //   remain off.
 //
 //============================================================================
 
 // Switch debounce set to 40ms (5 interrupts at 8ms each)
 #define SWITCH_DEBOUNCE_COUNT 5
+
+// Button debounce set to 40ms (5 interrupts at 8ms each)
+#define BUTTON_DEBOUNCE_COUNT 5
 
 // Loop count set to 200ms (25 interrupts at 8ms each)
 #define LOOP_COUNT 25
@@ -49,6 +52,8 @@ volatile uint8_t loop_counter = 0;
 ISR(TIMER0_COMPA_vect) {
     static uint8_t switch_y_high_counter = 0;
     static uint8_t switch_y_low_counter = 0;
+    static uint8_t button_x_high_counter = 0;
+    static uint8_t button_x_low_counter = 0;
 
     if (loop_counter < 255U) {
         loop_counter++;
@@ -71,11 +76,49 @@ ISR(TIMER0_COMPA_vect) {
         }
     }
 
+    // Clear Button X relevant counter based on Button X GPIO state
+    if (PINB & (1 << BUTTON_X_PIN)) {
+        // Clear low counter
+        button_x_low_counter = 0;
+        // Increment high counter until debounced
+        if (button_x_high_counter <= BUTTON_DEBOUNCE_COUNT) {
+            button_x_high_counter++;
+        }
+    } else {
+        // Increment low counter until debounced
+        if (button_x_low_counter <= BUTTON_DEBOUNCE_COUNT) {
+            button_x_low_counter++;
+        }
+        // Clear high counter
+        button_x_high_counter = 0;
+    }
+
+    // Edge trigger of debounced switch change
+    if (switch_y_high_counter >= SWITCH_DEBOUNCE_COUNT) {
+        SET_FLAG__SWITCH_Y_OFF;
+    } else {
+        CLEAR_FLAG__SWITCH_Y_OFF;
+    }
+
     // Edge trigger of debounced switch change
     if (switch_y_low_counter >= SWITCH_DEBOUNCE_COUNT) {
         SET_FLAG__SWITCH_Y_ON;
     } else {
         CLEAR_FLAG__SWITCH_Y_ON;
+    }
+
+    // Edge trigger of debounced button change
+    if (button_x_high_counter >= SWITCH_DEBOUNCE_COUNT) {
+        SET_FLAG__BUTTON_X_RELEASED;
+    } else {
+        CLEAR_FLAG__BUTTON_X_RELEASED;
+    }
+
+    // Edge trigger of debounced button change
+    if (button_x_low_counter >= SWITCH_DEBOUNCE_COUNT) {
+        SET_FLAG__BUTTON_X_PRESSED;
+    } else {
+        CLEAR_FLAG__BUTTON_X_PRESSED;
     }
 }
 
@@ -125,6 +168,12 @@ void switch_y_init() {
     DDRB &= ~(1 << SWITCH_Y_PIN);
 }
 
+/* Initialize the Button X Input */
+void button_x_init() {
+    PORTB |= (1 << BUTTON_X_PIN);
+    DDRB &= ~(1 << BUTTON_X_PIN);
+}
+
 int main(void) {
 
     CLEAR_ALL_FLAGS
@@ -154,6 +203,9 @@ int main(void) {
 
     // Initialize the Switch Y Input
     switch_y_init();
+
+    // Initialize the Button X Input
+    button_x_init();
 
     // set processor to sleep mode idle to save power between interrupts
     set_sleep_mode(SLEEP_MODE_IDLE);
@@ -217,7 +269,7 @@ int main(void) {
             state = 0;
         }
 
-    if (READ_FLAG__SWITCH_Y_ON) {
+    if (READ_FLAG__BUTTON_X_PRESSED) {
         next_led_state = COLOR_BLACK;
     }
 

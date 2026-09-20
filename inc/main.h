@@ -49,6 +49,7 @@
 
 // Register used to capture flags
 register uint8_t timer_1_flags __asm__("r2");
+register uint8_t timer_2_flags __asm__("r3");
 
 // Flag is Active when Switch 1 debounced state is High
 #define SET_FLAG__SWITCH_Y_ON                       timer_1_flags |= (1 << 5);
@@ -60,7 +61,18 @@ register uint8_t timer_1_flags __asm__("r2");
 #define CLEAR_FLAG__SWITCH_Y_OFF                   timer_1_flags &= ~(1 << 6);
 #define READ_FLAG__SWITCH_Y_OFF                       timer_1_flags & (1 << 6)
 
-#define CLEAR_ALL_FLAGS                                    timer_1_flags = 0U;
+// Flag is Active when Button X debounced state is High
+#define SET_FLAG__BUTTON_X_PRESSED                  timer_2_flags |= (1 << 6);
+#define CLEAR_FLAG__BUTTON_X_PRESSED               timer_2_flags &= ~(1 << 6);
+#define READ_FLAG__BUTTON_X_PRESSED                   timer_2_flags & (1 << 6)
+
+// Flag is Active when Button X debounced state is Low
+#define SET_FLAG__BUTTON_X_RELEASED                 timer_2_flags |= (1 << 7);
+#define CLEAR_FLAG__BUTTON_X_RELEASED              timer_2_flags &= ~(1 << 7);
+#define READ_FLAG__BUTTON_X_RELEASED                  timer_2_flags & (1 << 7)
+
+#define CLEAR_ALL_FLAGS                                  timer_1_flags = 0U; \
+                                                           timer_2_flags = 0U;
 
 //============================================================================
 

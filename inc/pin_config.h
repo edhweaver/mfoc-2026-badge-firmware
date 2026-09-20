@@ -29,7 +29,7 @@
 //                                 ATTINY85
 //                            .----------------.
 //                  RESET 1 --| PB5        VCC |-- 8
-//                 ADC-IN 2 --| PB3        PB2 |-- 7
+//                 ADC-IN 2 --| PB3        PB2 |-- 7 BUTTON-X
 //                        3 --| PB4        PB1 |-- 6 WS2812
 //                        4 --| GND        PB0 |-- 5 SWITCH-Y
 //                            '----------------'
@@ -57,6 +57,9 @@
 
 // Define PB0 as the Switch Y input pin
 #define SWITCH_Y_PIN PB0
+
+// Define PB2 as the Button X input pin
+#define BUTTON_X_PIN PB2
 
 // Define PB3 as the ADC input pin for the Team Identification
 #define ADC_INPUT_PIN PB3
