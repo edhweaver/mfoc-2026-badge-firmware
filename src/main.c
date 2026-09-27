@@ -251,7 +251,6 @@ volatile uint8_t nec_transmit_rate;
 volatile uint8_t nec_transmit_trigger;
 
 volatile uint8_t sao_device_address = 0;
-volatile uint8_t sao_buffer_index = 0;
 volatile uint8_t sao_buffer[SAO_BUFFER_LIMIT];
 volatile uint8_t sao_output_buffer[SAO_BUFFER_LIMIT];
 volatile uint8_t pulse_buffer[NEC_PIN_SNAPSHOT_BUFFER_LIMIT];
@@ -533,6 +532,8 @@ ISR(USI_START_vect) {
 }
 
 ISR(USI_OVF_vect) {
+
+    static uint8_t sao_buffer_index = 0;
 
     switch (sao_state) {
         case SAO_CHECK_ADDRESS:
