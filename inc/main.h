@@ -30,6 +30,7 @@
 #include <avr/eeprom.h>
 #include <avr/pgmspace.h>
 #include "pin_config.h"
+#include "usi_i2c.h"
 #include "gpio_ws2812.h"
 #include "gpio_ir_nec.h"
 #include "morse.h"
