@@ -852,7 +852,6 @@ int main(void) {
     // Team ID and SAO Device Address for the Badge
     uint8_t badge_team_id;
     uint16_t nec_transmit_team_address;
-    uint8_t sao_device_address;
     uint8_t skip_message_delay;
 
     uint8_t nec_input_buffer[NEC_INPUT_BUFFER_LIMIT];
