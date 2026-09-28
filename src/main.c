@@ -239,10 +239,12 @@ volatile uint8_t nec_transmit_repeats;
 volatile uint8_t nec_transmit_rate;
 volatile uint8_t nec_transmit_trigger;
 
+// Variables to hold the pulses detected from the NEC Receiver
+volatile uint8_t pulse_buffer[NEC_PIN_SNAPSHOT_BUFFER_LIMIT];
+
 volatile uint8_t sao_device_address = 0;
 volatile uint8_t sao_buffer[SAO_BUFFER_LIMIT];
 volatile uint8_t sao_output_buffer[SAO_BUFFER_LIMIT];
-volatile uint8_t pulse_buffer[NEC_PIN_SNAPSHOT_BUFFER_LIMIT];
 
 // Loop counter incremented by Timer 0 interrupt
 volatile uint8_t loop_counter = 0;
