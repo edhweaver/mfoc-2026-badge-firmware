@@ -24,6 +24,9 @@
 #ifndef USI_I2C_H
 #define	USI_I2C_H
 
+#include <avr/interrupt.h>
+#include "pin_config.h"
+
 #ifdef	__cplusplus
 extern "C" {
 #endif
@@ -38,6 +41,8 @@ enum sao_i2c_states {
     SAO_NACK_READ,
     SAO_WAIT
 };
+
+void i2c_initialize();
 
 //============================================================================
 //
@@ -222,24 +227,14 @@ enum sao_i2c_states {
 #define SAO_PIN_SCL_LOW                           !(PINB & (1 << SAO_SCL_PIN))
 
 // Start SAO Client
-#define SAO_START                                     SAO_CLEAR_CLOCK_DETECT \
-                                                                   SAO_ENABLED
+#define SAO_START                                                  SAO_ENABLED
 
 // Stop SAO Client
-#define SAO_STOP                                   SAO_CLEAR_INTERRUPT_FLAGS \
-                                                                  SAO_DISABLED
+#define SAO_STOP                                                  SAO_DISABLED
 
 // Check if SAO Client is stopped
 #define SAO_NOT_ACTIVE                                !(USICR & USI_START_ISR)
 #define SAO_ACTIVE                                     (USICR & USI_START_ISR)
-
-// Updated Flag Management Macros for SAO Client
-#define SAO_CLOCK_DETECTED                        READ_FLAG__SAO_STATE_TRIGGER
-#define SAO_CLEAR_CLOCK_DETECT                   CLEAR_FLAG__SAO_STATE_TRIGGER
-#define SAO_FRAME_DETECTED                        READ_FLAG__SAO_STATE_TRIGGER
-#define SAO_CLEAR_FRAME_DETECT                   CLEAR_FLAG__SAO_STATE_TRIGGER
-#define SAO_CLEAR_INTERRUPT_FLAGS                CLEAR_FLAG__SAO_STATE_TRIGGER
-
 
 #ifdef	__cplusplus
 }

@@ -251,19 +251,6 @@ queue_t nec_input_queue;
 
 //============================================================================
 
-void i2c_device_init(uint8_t address) {
-
-
-    SAO_START
-
-    sao_device_address = address;
-
-    SAO_INITIALIZE_PINS
-
-    USI_CLEAR_ALL_ISR_FLAGS
-
-    SAO_INTERRUPT_ON_START_CONDITION
-}
 
 ISR(USI_START_vect) {
     uint8_t i2c_start_condition_active = 1U;
@@ -726,6 +713,7 @@ uint8_t adc_read() {
 void switch_y_init() {
     PORTB |= (1 << SWITCH_Y_PIN);
     DDRB &= ~(1 << SWITCH_Y_PIN);
+    CLEAR_FLAG__SAO_STATE_TRIGGER
     SAO_STOP
     GIMSK |= (1 << PCIE);
     PCMSK |= (1 << SAO_CLOCK_DETECT_INTERRUPT);
@@ -761,7 +749,7 @@ void initialize(void) {
     // Initialize the Button X Input
     button_x_init();
 
-    SAO_CLEAR_INTERRUPT_FLAGS
+    CLEAR_FLAG__SAO_STATE_TRIGGER
 
     // Initialize the NEC Transmitter pin
     ir_nec_set_pin();
@@ -940,9 +928,9 @@ int main(void) {
     // Initialize SAO if switch is high
     if (PINB & (1 << SWITCH_Y_PIN)) {
         cli();
-        i2c_device_init(sao_device_address);
+        i2c_initialize();
         sei();
-        SAO_CLEAR_CLOCK_DETECT
+        CLEAR_FLAG__SAO_STATE_TRIGGER
         sao_port_status = SAO_PORT_I2C_ACTIVE;
     } else {
         sao_port_status = SAO_PORT_I2C_DISABLED;
