@@ -338,6 +338,10 @@ void i2c_read_value(uint8_t register_address, uint8_t index, uint8_t * data) {
     }
 }
 
+void i2c_read_address(uint8_t * device_address) {
+    *device_address = sao_device_address;
+}
+
 //============================================================================
 //
 // Section: Interrupt Functions
@@ -398,16 +402,18 @@ ISR(USI_OVF_vect) {
     static uint8_t sao_buffer_index = 0;
     static uint8_t sao_buffer[SAO_BUFFER_LIMIT] = { [0 ... SAO_BUFFER_LIMIT-1] = 0xFF };
     static uint8_t sao_output_buffer[SAO_BUFFER_LIMIT] = { [0 ... SAO_BUFFER_LIMIT-1] = 0xFF };
+    static uint8_t i2c_address;
 
     if (READ_FLAG__I2C_START_OF_FRAME) {
         sao_state = SAO_CHECK_ADDRESS;
+        i2c_read_address(&i2c_address);
         CLEAR_FLAG__I2C_START_OF_FRAME
     }
 
     switch (sao_state) {
         case SAO_CHECK_ADDRESS:
             // Check if frame matches the 7-bit SAO Device Address
-            if ((USIDR >> 1) == sao_device_address) {
+            if ((USIDR >> 1) == i2c_address) {
                 // Check if frame is a Read Transaction or Write Transaction
                 if (USIDR & 0x01) {
                     // Read Transaction

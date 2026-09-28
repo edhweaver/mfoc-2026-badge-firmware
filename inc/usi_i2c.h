@@ -44,6 +44,7 @@ enum sao_i2c_states {
 
 void i2c_write_value(uint8_t register_address, uint8_t index, uint8_t * incoming_data,  uint8_t * outgoing_data);
 void i2c_read_value(uint8_t register_address, uint8_t index, uint8_t * data);
+void i2c_read_address(uint8_t * device_address);
 void i2c_initialize();
 
 //============================================================================

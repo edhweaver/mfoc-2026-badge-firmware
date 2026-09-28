@@ -31,6 +31,9 @@ __attribute__((weak)) void i2c_read_value(uint8_t register_address, uint8_t inde
     data[0] = 0xFFU;
 }
 
+__attribute__((weak)) void i2c_read_address(uint8_t * device_address) {
+    *device_address = 0xFF;
+}
 
 void i2c_initialize() {
 
