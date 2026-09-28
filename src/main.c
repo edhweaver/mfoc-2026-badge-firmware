@@ -251,6 +251,85 @@ queue_t nec_input_queue;
 
 //============================================================================
 
+void i2c_write_value(uint8_t register_value, uint8_t index, uint8_t * incoming_data,  uint8_t * outgoing_data) {
+    if (index == 0) {
+        if (outgoing_data[0] <= 0x02U) {
+            outgoing_data[0] = register_value;
+        } else {
+            outgoing_data[0] = 0xFFU;
+        }
+    } else if (index == 6) {
+        if (outgoing_data[0] == 0x02U) {
+            nec_transmit_address = (uint16_t) ((incoming_data[2] << 8) | incoming_data[1]);
+            nec_transmit_command = incoming_data[3];
+            nec_transmit_repeats = incoming_data[4];
+            nec_transmit_rate = incoming_data[5];
+            nec_transmit_trigger = incoming_data[5];
+        }
+    }
+}
+
+void i2c_read_value(uint8_t register_value, uint8_t index, uint8_t * outgoing_data) {
+
+    switch (register_value) {
+        case 0x00U:
+            if (index < 18) {
+                *outgoing_data = (uint8_t) FIRMWARE_ID[index - 1U];
+            } else if (index < 23) {
+                *outgoing_data = (uint8_t) FIRMWARE_VERSION[index - 18U];
+            } else {
+                *outgoing_data = 0xFF;
+            }
+            break;
+        case 0x01U:
+            switch (index) {
+                case 1:
+                    *outgoing_data = (uint8_t) ((nec_input_address & 0xFF00U) >> 8);
+                    break;
+                case 2:
+                    *outgoing_data = (uint8_t) (nec_input_address & 0x00FFU);
+                    break;
+                case 3:
+                    *outgoing_data = nec_input_command;
+                    break;
+                case 4:
+                    *outgoing_data = nec_input_capture_age;
+                    break;
+                default:
+                    *outgoing_data = 0xFFU;
+                    break;
+            }
+            break;
+        case 0x02U:
+            switch (index) {
+                case 1:
+                    *outgoing_data = (uint8_t) ((nec_transmit_address & 0xFF00U) >> 8);
+                    break;
+                case 2:
+                    *outgoing_data = (uint8_t) (nec_transmit_address & 0x00FFU);
+                    break;
+                case 3:
+                    *outgoing_data = nec_transmit_command;
+                    break;
+                case 4:
+                    *outgoing_data = nec_transmit_repeats;
+                    break;
+                case 5:
+                    *outgoing_data = nec_transmit_rate;
+                    break;
+                case 6:
+                    *outgoing_data = nec_transmit_trigger;
+                    break;
+                default:
+                    *outgoing_data = 0xFF;
+                    break;
+            }
+            break;
+        default:
+            *outgoing_data = 0xFF;
+            break;
+    }
+}
 
 ISR(USI_START_vect) {
     uint8_t i2c_start_condition_active = 1U;
@@ -337,17 +416,7 @@ ISR(USI_OVF_vect) {
                 sao_buffer[sao_buffer_index - 1] = USIDR;
                 sao_state = SAO_ACK_WRITE;
                 SAO_SEND_ACK
-                if (sao_buffer_index == 1) {
-                    sao_output_buffer[0] = sao_buffer[0];
-                } else if (sao_buffer_index == 6) {
-                    if (sao_output_buffer[0] == 0x02U) {
-                        nec_transmit_address = (uint16_t) ((sao_buffer[2] << 8) | sao_buffer[1]);
-                        nec_transmit_command = sao_buffer[3];
-                        nec_transmit_repeats = sao_buffer[4];
-                        nec_transmit_rate = sao_buffer[5];
-                        nec_transmit_trigger = sao_buffer[5];
-                    }
-                }
+                i2c_write_value(sao_buffer[0], sao_buffer_index, sao_output_buffer, sao_output_buffer);
                 sao_buffer_index++;
             } else {
                 SAO_SEND_NACK
@@ -368,125 +437,7 @@ ISR(USI_OVF_vect) {
         case SAO_ACK_READ:
             if (sao_buffer_index <= SAO_BUFFER_LIMIT) {
                 USIDR = sao_output_buffer[sao_buffer_index - 1];
-                switch(sao_output_buffer[0]) {
-                    default:
-                        sao_output_buffer[sao_buffer_index] = 0xFF;
-                        break;
-                    case 0x00U:
-                        switch (sao_buffer_index) {
-                            case 1:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[0];
-                                break;
-                            case 2:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[1];
-                                break;
-                            case 3:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[2];
-                                break;
-                            case 4:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[3];
-                                break;
-                            case 5:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[4];
-                                break;
-                            case 6:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[5];
-                                break;
-                            case 7:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[6];
-                                break;
-                            case 8:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[7];
-                                break;
-                            case 9:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[8];
-                                break;
-                            case 10:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[9];
-                                break;
-                            case 11:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[10];
-                                break;
-                            case 12:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[11];
-                                break;
-                            case 13:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[12];
-                                break;
-                            case 14:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[13];
-                                break;
-                            case 15:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[14];
-                                break;
-                            case 16:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[15];
-                                break;
-                            case 17:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_ID[16];
-                                break;
-                            case 18:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_VERSION[0];
-                                break;
-                            case 19:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_VERSION[1];
-                                break;
-                            case 20:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_VERSION[2];
-                                break;
-                            case 21:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_VERSION[3];
-                                break;
-                            case 22:
-                                sao_output_buffer[sao_buffer_index] = (uint8_t) FIRMWARE_VERSION[4];
-                                break;
-                            default:
-                                sao_output_buffer[sao_buffer_index] = 0xFF;
-                                break;
-                        }
-                        break;
-                    case 0x01U:
-                        switch (sao_buffer_index) {
-                            case 1:
-                                sao_output_buffer[1] = (uint8_t) ((nec_input_address & 0xFF00U) >> 8);
-                                break;
-                            case 2:
-                                sao_output_buffer[2] = (uint8_t) (nec_input_address & 0x00FFU);
-                                break;
-                            case 3:
-                                sao_output_buffer[3] = nec_input_command;
-                                break;
-                            case 4:
-                                sao_output_buffer[4] = nec_input_capture_age;
-                                break;
-                            default:
-                                sao_output_buffer[sao_buffer_index] = 0xFF;
-                                break;
-                        }
-                        break;
-                    case 0x02U:
-                        switch (sao_buffer_index) {
-                            case 1:
-                                sao_output_buffer[1] = (uint8_t) ((nec_transmit_address & 0xFF00U) >> 8);
-                                break;
-                            case 2:
-                                sao_output_buffer[2] = (uint8_t) (nec_transmit_address & 0x00FFU);
-                                break;
-                            case 3:
-                                sao_output_buffer[3] = nec_transmit_command;
-                                break;
-                            case 4:
-                                sao_output_buffer[4] = nec_transmit_repeats;
-                                break;
-                            case 5:
-                                sao_output_buffer[5] = nec_transmit_trigger;
-                                break;
-                            default:
-                                sao_output_buffer[sao_buffer_index] = 0xFF;
-                                break;
-                        }
-                        break;
-                }
+                i2c_read_value(sao_output_buffer[0], sao_buffer_index, &sao_output_buffer[sao_buffer_index]);
                 sao_buffer_index++;
                 sao_state = SAO_READ_DATA;
                 SAO_SEND_DATA_IN_USIDR
