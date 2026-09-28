@@ -243,13 +243,9 @@ volatile uint8_t nec_transmit_trigger;
 volatile uint8_t pulse_buffer[NEC_PIN_SNAPSHOT_BUFFER_LIMIT];
 
 volatile uint8_t sao_device_address = 0;
-volatile uint8_t sao_buffer[SAO_BUFFER_LIMIT];
-volatile uint8_t sao_output_buffer[SAO_BUFFER_LIMIT];
 
 // Loop counter incremented by Timer 0 interrupt
 volatile uint8_t loop_counter = 0;
-
-volatile enum sao_i2c_states sao_state;
 
 queue_t nec_input_queue;
 
@@ -257,15 +253,8 @@ queue_t nec_input_queue;
 
 void i2c_device_init(uint8_t address) {
 
-    uint8_t counter;
 
     SAO_START
-
-    for (counter = 0; counter < SAO_BUFFER_LIMIT; counter++)
-    {
-        sao_buffer[counter] = 0xFF;
-        sao_output_buffer[counter] = 0xFF;
-    }
 
     sao_device_address = address;
 
@@ -274,8 +263,6 @@ void i2c_device_init(uint8_t address) {
     USI_CLEAR_ALL_ISR_FLAGS
 
     SAO_INTERRUPT_ON_START_CONDITION
-
-    sao_state = SAO_CHECK_ADDRESS;
 }
 
 ISR(USI_START_vect) {
@@ -284,7 +271,7 @@ ISR(USI_START_vect) {
     uint32_t time_out_counter = 0U;
 
     // Set state machine to check to check for the SAO Device Address
-    sao_state = SAO_CHECK_ADDRESS;
+    SET_FLAG__I2C_START_OF_FRAME
 
     // Wait for the start condition to finish
     while (i2c_start_condition_active) {
@@ -323,7 +310,15 @@ ISR(USI_START_vect) {
 
 ISR(USI_OVF_vect) {
 
+    static enum sao_i2c_states sao_state = SAO_CHECK_ADDRESS;
     static uint8_t sao_buffer_index = 0;
+    static uint8_t sao_buffer[SAO_BUFFER_LIMIT] = { [0 ... SAO_BUFFER_LIMIT-1] = 0xFF };
+    static uint8_t sao_output_buffer[SAO_BUFFER_LIMIT] = { [0 ... SAO_BUFFER_LIMIT-1] = 0xFF };
+
+    if (READ_FLAG__I2C_START_OF_FRAME) {
+        sao_state = SAO_CHECK_ADDRESS;
+        CLEAR_FLAG__I2C_START_OF_FRAME
+    }
 
     switch (sao_state) {
         case SAO_CHECK_ADDRESS:

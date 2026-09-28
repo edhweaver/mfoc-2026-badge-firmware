@@ -125,6 +125,11 @@ register uint8_t timer_2_flags __asm__("r3");
 #define CLEAR_FLAG__NEC_RECEIVER_ACTIVE            timer_2_flags &= ~(1 << 2);
 #define READ_FLAG__NEC_RECEIVER_ACTIVE                timer_2_flags & (1 << 2)
 
+// Flag is Active when NEC Receiver is active
+#define SET_FLAG__I2C_START_OF_FRAME                timer_2_flags |= (1 << 3);
+#define CLEAR_FLAG__I2C_START_OF_FRAME             timer_2_flags &= ~(1 << 3);
+#define READ_FLAG__I2C_START_OF_FRAME                 timer_2_flags & (1 << 3)
+
 #define READ_FLAG__TIME_CRITICAL_ACTIVE             timer_2_flags & 0b00000110
 
 #define CLEAR_ALL_FLAGS                                  timer_1_flags = 0U; \
