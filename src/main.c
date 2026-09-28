@@ -338,6 +338,16 @@ void i2c_read_value(uint8_t register_address, uint8_t index, uint8_t * data) {
     }
 }
 
+//============================================================================
+//
+// Section: Interrupt Functions
+//
+//      This section contains the Interrupt functions that are called one
+//   triggered.
+//
+//============================================================================
+
+/* Universal Serial Interface Two Wire Start Condition*/
 ISR(USI_START_vect) {
     uint8_t i2c_start_condition_active = 1U;
     uint8_t i2c_frame_started = 0U;
@@ -381,6 +391,7 @@ ISR(USI_START_vect) {
     }
 }
 
+/* Universal Serial Interface Two Wire Clock Counter Overflow*/
 ISR(USI_OVF_vect) {
 
     static enum sao_i2c_states sao_state = SAO_CHECK_ADDRESS;
@@ -465,8 +476,6 @@ ISR(USI_OVF_vect) {
 
     SET_FLAG__SAO_STATE_TRIGGER
 }
-
-//============================================================================
 
 /* Timer/Counter0 Compare Match A */
 ISR(TIMER0_COMPA_vect) {
@@ -583,8 +592,7 @@ ISR(TIMER1_COMPA_vect) {
     }
 }
 
-//============================================================================
-
+/* GPIO Pin Change */
 ISR(PCINT0_vect) {
     uint8_t nec_timing_flags;
 
