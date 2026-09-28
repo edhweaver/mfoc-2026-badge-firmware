@@ -23,12 +23,12 @@
 
 #include "usi_i2c.h"
 
-__attribute__((weak)) void i2c_write_value(uint8_t register_value, uint8_t index, uint8_t * incoming_data,  uint8_t * outgoing_data) {
+__attribute__((weak)) void i2c_write_value(uint8_t register_address, uint8_t index, uint8_t * incoming_data,  uint8_t * outgoing_data) {
     ;
 }
 
-__attribute__((weak)) void i2c_read_value(uint8_t register_value, uint8_t index, uint8_t * outgoing_data) {
-    outgoing_data[0] = 0xFFU;
+__attribute__((weak)) void i2c_read_value(uint8_t register_address, uint8_t index, uint8_t * data) {
+    data[0] = 0xFFU;
 }
 
 

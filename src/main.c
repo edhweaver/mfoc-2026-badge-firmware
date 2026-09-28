@@ -250,16 +250,23 @@ volatile uint8_t loop_counter = 0;
 queue_t nec_input_queue;
 
 //============================================================================
+//
+// Section: Strong functions implementing SAO behavior
+//
+//      This section contains the strong functions that will provide the SAO
+//   data for this project.
+//
+//============================================================================
 
-void i2c_write_value(uint8_t register_value, uint8_t index, uint8_t * incoming_data,  uint8_t * outgoing_data) {
+void i2c_write_value(uint8_t register_address, uint8_t index, uint8_t * incoming_data,  uint8_t * outgoing_data) {
     if (index == 0) {
-        if (outgoing_data[0] <= 0x02U) {
-            outgoing_data[0] = register_value;
+        if (*outgoing_data <= 0x02U) {
+            *outgoing_data = register_address;
         } else {
-            outgoing_data[0] = 0xFFU;
+            *outgoing_data = 0xFFU;
         }
     } else if (index == 6) {
-        if (outgoing_data[0] == 0x02U) {
+        if (*outgoing_data == 0x02U) {
             nec_transmit_address = (uint16_t) ((incoming_data[2] << 8) | incoming_data[1]);
             nec_transmit_command = incoming_data[3];
             nec_transmit_repeats = incoming_data[4];
@@ -269,64 +276,64 @@ void i2c_write_value(uint8_t register_value, uint8_t index, uint8_t * incoming_d
     }
 }
 
-void i2c_read_value(uint8_t register_value, uint8_t index, uint8_t * outgoing_data) {
+void i2c_read_value(uint8_t register_address, uint8_t index, uint8_t * data) {
 
-    switch (register_value) {
+    switch (register_address) {
         case 0x00U:
             if (index < 18) {
-                *outgoing_data = (uint8_t) FIRMWARE_ID[index - 1U];
+                *data = (uint8_t) FIRMWARE_ID[index - 1U];
             } else if (index < 23) {
-                *outgoing_data = (uint8_t) FIRMWARE_VERSION[index - 18U];
+                *data = (uint8_t) FIRMWARE_VERSION[index - 18U];
             } else {
-                *outgoing_data = 0xFF;
+                *data = 0xFF;
             }
             break;
         case 0x01U:
             switch (index) {
                 case 1:
-                    *outgoing_data = (uint8_t) ((nec_input_address & 0xFF00U) >> 8);
+                    *data = (uint8_t) ((nec_input_address & 0xFF00U) >> 8);
                     break;
                 case 2:
-                    *outgoing_data = (uint8_t) (nec_input_address & 0x00FFU);
+                    *data = (uint8_t) (nec_input_address & 0x00FFU);
                     break;
                 case 3:
-                    *outgoing_data = nec_input_command;
+                    *data = nec_input_command;
                     break;
                 case 4:
-                    *outgoing_data = nec_input_capture_age;
+                    *data = nec_input_capture_age;
                     break;
                 default:
-                    *outgoing_data = 0xFFU;
+                    *data = 0xFFU;
                     break;
             }
             break;
         case 0x02U:
             switch (index) {
                 case 1:
-                    *outgoing_data = (uint8_t) ((nec_transmit_address & 0xFF00U) >> 8);
+                    *data = (uint8_t) ((nec_transmit_address & 0xFF00U) >> 8);
                     break;
                 case 2:
-                    *outgoing_data = (uint8_t) (nec_transmit_address & 0x00FFU);
+                    *data = (uint8_t) (nec_transmit_address & 0x00FFU);
                     break;
                 case 3:
-                    *outgoing_data = nec_transmit_command;
+                    *data = nec_transmit_command;
                     break;
                 case 4:
-                    *outgoing_data = nec_transmit_repeats;
+                    *data = nec_transmit_repeats;
                     break;
                 case 5:
-                    *outgoing_data = nec_transmit_rate;
+                    *data = nec_transmit_rate;
                     break;
                 case 6:
-                    *outgoing_data = nec_transmit_trigger;
+                    *data = nec_transmit_trigger;
                     break;
                 default:
-                    *outgoing_data = 0xFF;
+                    *data = 0xFF;
                     break;
             }
             break;
         default:
-            *outgoing_data = 0xFF;
+            *data = 0xFF;
             break;
     }
 }
